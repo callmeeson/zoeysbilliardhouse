@@ -1,0 +1,26 @@
+# Zoeys Billiard House SPA routing
+RewriteEngine On
+Options -Indexes
+
+# Hardening: no direct web access to internals
+RewriteRule ^(?:includes|database|backups)/ - [F,L]
+RewriteRule ^config\.php$ - [F,L]
+
+# SPA API calls (/api/ajax/...) -> PHP ajax handlers
+RewriteRule ^api/ajax/(.*)$ ajax/$1 [L,QSA]
+
+# Built frontend files (dist/) served at the project root
+RewriteRule ^logo\.png$ dist/logo.png [L]
+RewriteRule ^assets/(.*)$ dist/assets/$1 [L,QSA]
+
+# Security headers
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Hide PHP version banner (Apache mod_php)
+<IfModule mod_php.c>
+  php_flag expose_php Off
+</IfModule>
