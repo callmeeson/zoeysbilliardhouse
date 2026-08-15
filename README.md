@@ -165,4 +165,4 @@ src/             Vue 3 source (views, stores, api client)
 uploads/         Uploaded files (receipt logo)
 config.php       Environment + session hardening + DB bootstrap
 .htaccess        SPA/API routing + security hardening (Apache)
-```
+```"# zoeysbilliardhouse" 
