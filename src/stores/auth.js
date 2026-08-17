@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/api/services'
+import { toast } from '@/utils/dialogs'
 import router from '@/router'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -11,7 +12,6 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!user.value)
   const isAdmin = computed(() => user.value?.role === 'admin' || user.value?.role === 'superadmin')
   const isSuperadmin = computed(() => user.value?.role === 'superadmin')
-  const isStaff = computed(() => user.value?.role === 'staff')
 
   async function login(username, password) {
     loading.value = true
@@ -21,6 +21,8 @@ export const useAuthStore = defineStore('auth', () => {
       if (response.data.ok) {
         user.value = response.data.user
         const role = user.value?.role
+        const name = user.value?.full_name || user.value?.username
+        toast(`Welcome back, ${name}!`, 'success')
         router.push(role === 'staff' ? '/sessions' : '/')
       } else {
         error.value = response.data.message || 'Login failed'
@@ -46,10 +48,17 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
+    user.value = null
     try {
-      await authApi.logout()
+      const response = await authApi.logout()
+      if (response?.data?.ok === false && response?.data?.message) {
+        // Session is already gone; treat it as a clean logout.
+      }
+    } catch (e) {
+      if (e?.response?.status !== 401) {
+        throw e
+      }
     } finally {
-      user.value = null
       router.push('/login')
     }
   }
@@ -67,7 +76,6 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isAdmin,
     isSuperadmin,
-    isStaff,
     login,
     logout,
     fetchUser,

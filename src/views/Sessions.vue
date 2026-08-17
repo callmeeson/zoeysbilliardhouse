@@ -171,7 +171,7 @@
           <div>
             <div class="text-sm font-semibold text-ink"><Stamp :size="14" class="mr-1 inline text-brand-gold-strong" />{{ startForm.selectedCustomer.name }} — {{ loyalty }}/10 stamps</div>
             <div class="text-xs text-muted">
-              {{ canClaimFree ? '10 stamps reached — claim a free hour of play!' : (loyalty >= 10 ? 'Claim requires at least 1 hour availed.' : (10 - loyalty) + ' more stamp' + (10 - loyalty === 1 ? '' : 's') + ' to earn a free hour (play 1+ hr/day).') }}
+              {{ canClaimFree ? '10 stamps reached — claim a free hour of play!' : (stampEarnedToday ? 'Stamp earned this open period — redeemable from the next shop opening.' : (loyalty >= 10 ? 'Claim requires at least 1 hour availed.' : (10 - loyalty) + ' more stamp' + (10 - loyalty === 1 ? '' : 's') + ' to earn a free hour (play 1+ hr/day).')) }}
             </div>
           </div>
           <button type="button" role="switch" aria-checked="startForm.freeHour" class="relative h-5 w-9 shrink-0 rounded-full transition-colors duration-150 disabled:opacity-40" :class="startForm.freeHour ? 'bg-brand-green' : 'bg-line-strong'" :disabled="!canClaimFree" @click="startForm.freeHour = !startForm.freeHour">
@@ -207,7 +207,6 @@
       <div class="mb-3 rounded-xl border border-line bg-elevated p-3.5">
         <div class="flex justify-between py-0.5 text-sm"><span class="text-muted">Rate</span><span class="font-medium text-ink">{{ money(startTable.rate) }}/hr</span></div>
         <div class="flex justify-between py-0.5 text-sm"><span class="text-muted">Hours</span><span class="font-medium text-ink">{{ hoursText(startForm.hours) }}</span></div>
-        <div v-if="startFree > 0" class="flex justify-between py-0.5 text-sm"><span class="text-muted">Free Hour (loyalty)</span><span class="font-semibold text-red-500">−{{ money(startFree) }}</span></div>
         <div v-if="startFree > 0" class="flex justify-between py-0.5 text-sm"><span class="text-muted">Free Hour (loyalty)</span><span class="font-semibold text-red-500">−{{ money(startFree) }}</span></div>
         <div v-if="startDiscount > 0" class="flex justify-between py-0.5 text-sm"><span class="text-muted">Promo {{ promoLabel }}</span><span class="font-semibold text-red-500">−{{ money(startDiscount) }}</span></div>
         <div class="mt-2 flex items-center justify-between border-t border-line pt-2">
@@ -607,7 +606,9 @@ const filteredSelectTables = computed(() => {
 // start summary
 const startTotal = computed(() => (startTable.value ? startTable.value.rate * startForm.value.hours : 0))
 const loyalty = computed(() => startForm.value.selectedCustomer?.loyalty_stamps || 0)
-const canClaimFree = computed(() => !!startForm.value.selectedCustomer && loyalty.value >= 10 && startForm.value.hours >= 1)
+const stampsUsable = computed(() => startForm.value.selectedCustomer?.stamps_usable ?? loyalty.value)
+const stampEarnedToday = computed(() => loyalty.value >= 10 && stampsUsable.value < 10)
+const canClaimFree = computed(() => !!startForm.value.selectedCustomer && stampsUsable.value >= 10 && startForm.value.hours >= 1)
 const startFree = computed(() => (canClaimFree.value && startForm.value.freeHour ? startTable.value.rate : 0))
 const startBilled = computed(() => Math.max(0, startTotal.value - startFree.value))
 const startDiscount = computed(() => (startForm.value.promo && activePromo.value ? Math.round(startBilled.value * (activePromo.value.discount_percent / 100) * 100) / 100 : 0))
@@ -696,7 +697,14 @@ function selectCustomer(c) {
 }
 
 async function confirmStart() {
-  if (startForm.value.payment < startDue.value - 0.001) return
+  if (startForm.value.payment < startDue.value - 0.001) {
+    toast('Payment must cover the total due.')
+    return
+  }
+  if (startForm.value.isWalkIn && !startForm.value.walkin_name.trim()) {
+    toast('Walk-in name is required.')
+    return
+  }
   submitting.value = true
   try {
     const body = {
@@ -714,7 +722,7 @@ async function confirmStart() {
       await new Promise((r) => setTimeout(r, 800))
       startTable.value = null
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     submitting.value = false
@@ -742,7 +750,14 @@ function closeExtend() {
 }
 
 async function confirmExtend() {
-  if (extendForm.value.payment < extendDue.value - 0.001) return
+  if (extendForm.value.payment < extendDue.value - 0.001) {
+    toast('Payment must cover the total due.')
+    return
+  }
+  if (!extendForm.value.hours || extendForm.value.hours < 1) {
+    toast('Hours must be at least 1.')
+    return
+  }
   submitting.value = true
   try {
     const res = await store.extendSession({
@@ -755,7 +770,7 @@ async function confirmExtend() {
       toast(`Session extended on Table ${extendTarget.value.table.table_number}`, 'success')
       closeExtend()
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     submitting.value = false
@@ -768,13 +783,17 @@ function openVoid(s) {
 }
 
 async function confirmVoid() {
+  if (!voidReason.value.trim()) {
+    toast('A reason is required to void a session.')
+    return
+  }
   submitting.value = true
   try {
     const res = await store.cancelSession(voidTarget.value.id, voidReason.value.trim())
     if (res.ok) {
       voidTarget.value = null
       toast('Session voided', 'success')
-    } else alert(res.message)
+    } else toast(res.message)
   } finally {
     submitting.value = false
   }
@@ -794,22 +813,23 @@ async function confirmEnd() {
       receipt.value = res.session
       toast(`Session ended — Table ${endedTable}`, 'success')
     } else {
-      alert(res.message || 'Could not end the session. Please try again.')
+      toast(res.message || 'Could not end the session. Please try again.')
     }
   } catch (e) {
-    alert('Could not end the session. Please try again.')
+    toast('Could not end the session. Please try again.')
   } finally {
     submitting.value = false
   }
 }
 
 function sessionCanClaimFree(s) {
-  return !!s.customer_id && !s.free_hour_used && Number(s.customer_stamps || 0) >= 10
+  return !!s.customer_id && !s.free_hour_used && Number(s.stamps_usable ?? s.customer_stamps ?? 0) >= 10
 }
 
 async function claimFreeHour(s) {
   const res = await store.claimFreeHour(s.id)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast('Free hour claimed', 'success')
+  else toast(res.message)
 }
 
 // reservation
@@ -852,7 +872,7 @@ const resCrossesMidnight = computed(() => {
 
 async function submitReservation() {
   if (!resForm.value.customer_name.trim()) {
-    alert('Please enter a customer name.')
+    toast('Please enter a customer name.')
     return
   }
   const res = await reservationsStore.saveReservation({
@@ -863,7 +883,7 @@ async function submitReservation() {
   if (res.ok) {
     toast('Reservation saved', 'success')
     showReservation.value = false
-  } else alert(res.message)
+  } else toast(res.message)
 }
 
 async function searchResCustomers() {

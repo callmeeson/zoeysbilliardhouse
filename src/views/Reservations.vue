@@ -377,7 +377,14 @@ const selectCustomer = (c) => {
 }
 
 const submitForm = async () => {
-  if (!form.value.customer_name.trim()) return
+  if (!form.value.customer_name.trim()) {
+    toast('Customer name is required.')
+    return
+  }
+  if (!form.value.reservation_date || !form.value.start_time || !form.value.hours) {
+    toast('Date, start time and hours are required.')
+    return
+  }
   loading.value = true
   try {
     const res = await store.saveReservation({
@@ -388,7 +395,7 @@ const submitForm = async () => {
     if (res.ok) {
       showForm.value = false
       toast('Reservation saved', 'success')
-    } else alert(res.message)
+    } else toast(res.message)
   } finally {
     loading.value = false
   }
@@ -414,10 +421,10 @@ const startReservedSession = async () => {
       toast(msg, 'success')
       loadReservations()
     } else {
-      alert(res.data.message)
+      toast(res.data.message)
     }
   } catch (e) {
-    alert('Could not start the session. Please try again.')
+    toast('Could not start the session. Please try again.')
   } finally {
     starting.value = false
     startingId.value = 0
@@ -427,13 +434,14 @@ const startReservedSession = async () => {
 const changeStatus = async (r, status) => {
   const res = await store.setStatus(r.id, status)
   if (res.ok) toast(`Status updated to ${statusLabel(status)}`, 'success')
-  else alert(res.message)
+  else toast(res.message)
 }
 
 const remove = async (r) => {
   if (!(await confirmBox({ title: 'Delete reservation?', message: `Delete reservation for ${r.customer_name}? This cannot be undone.`, danger: true }))) return
   const res = await store.deleteReservation(r.id)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast('Reservation deleted.', 'success')
+  else toast(res.message)
 }
 </script>
 

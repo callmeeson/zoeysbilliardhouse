@@ -146,7 +146,7 @@ const scheduledEnd = computed(() => {
   return rawEnd || (startEpoch ? startEpoch + 3600 * 1000 : 0)
 })
 const hasPassed = computed(() => scheduledEnd.value > 0 && props.now > scheduledEnd.value)
-const canClaimFree = computed(() => !!props.table.session?.customer_id && !props.table.session.free_hour_used && Number(props.table.session.customer_stamps || 0) >= 10)
+const canClaimFree = computed(() => !!props.table.session?.customer_id && !props.table.session.free_hour_used && Number(props.table.session.stamps_usable ?? props.table.session.customer_stamps ?? 0) >= 10)
 
 const money = (amount) => '₱' + Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const capitalize = (str) => str ? str.charAt(0).toUpperCase() + str.slice(1) : ''

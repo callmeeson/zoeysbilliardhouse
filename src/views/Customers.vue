@@ -109,7 +109,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { confirmBox } from '@/utils/dialogs'
+import { confirmBox, toast } from '@/utils/dialogs'
 import { Search, Stamp, Pencil, UserPlus, Save, Loader2, Trash2 } from '@lucide/vue'
 import { useCustomersStore } from '@/stores/customers'
 import { useAuthStore } from '@/stores/auth'
@@ -142,14 +142,16 @@ function openCustomer(c) {
 }
 
 async function submitCustomer() {
+  if (!customerForm.value.name.trim()) return toast('Customer name is required.')
   loading.value = true
   try {
     const res = await customersApi.save({ id: customerForm.value.id, name: customerForm.value.name.trim(), phone: customerForm.value.phone.trim() })
     if (res.data.ok) {
       showCustomerForm.value = false
       store.search(search.value)
+      toast(customerForm.value.id ? 'Customer updated.' : 'Customer added.', 'success')
     } else {
-      alert(res.data.message)
+      toast(res.data.message)
     }
   } finally {
     loading.value = false
@@ -163,8 +165,9 @@ async function removeCustomer(c) {
     const res = await customersApi.remove(c.id)
     if (res.data.ok) {
       await store.search(search.value)
+      toast('Customer removed.', 'success')
     } else {
-      alert(res.data.message)
+      toast(res.data.message)
     }
   } finally {
     loading.value = false
@@ -177,14 +180,16 @@ function openStamps(c) {
 }
 
 async function submitStamps() {
+  if (!Number.isFinite(Number(stampForm.value.stamps)) || Number(stampForm.value.stamps) < 0 || Number(stampForm.value.stamps) > 1000) return toast('Stamps must be between 0 and 1000.')
   loading.value = true
   try {
     const res = await customersApi.adjustStamps(stampTarget.value.id, stampForm.value.stamps)
     if (res.data.ok) {
       stampTarget.value = null
       await store.search(search.value)
+      toast('Stamps updated.', 'success')
     } else {
-      alert(res.data.message)
+      toast(res.data.message)
     }
   } finally {
     loading.value = false

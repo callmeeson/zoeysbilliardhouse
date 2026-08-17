@@ -28,24 +28,38 @@ switch ($action) {
         $sTime = $_GET['start_time'] ?? '00:00';
         $hours = (float)($_GET['hours'] ?? 0);
         $excludeId = (int)($_GET['exclude_id'] ?? 0);
+        [$sh, $sm] = array_map('intval', explode(':', $sTime));
+        $sStartMin = $sh * 60 + $sm;
         if ($hours > 0) {
-            [$sh, $sm] = array_map('intval', explode(':', $sTime));
-            $totalMin = $sh * 60 + $sm + (int)round($hours * 60);
+            $totalMin = $sStartMin + (int)round($hours * 60);
             $sEnd = sprintf('%02d:%02d', intdiv($totalMin, 60), $totalMin % 60);
         } else {
+            [$eh, $em] = array_map('intval', explode(':', $_GET['end_time'] ?? '23:59'));
+            $totalMin = $eh * 60 + $em;
             $sEnd = $_GET['end_time'] ?? '23:59';
         }
-        $params = [$date, $sEnd, $sTime];
+        $prevDate = date('Y-m-d', strtotime($date . ' -1 day'));
+        $nextDate = date('Y-m-d', strtotime($date . ' +1 day'));
+        $crossesMidnight = $totalMin > 1440;
+        $params = [$date, $sEnd, $sTime, $prevDate, $sStartMin];
+        if ($crossesMidnight) $params[] = $nextDate;
+        if ($crossesMidnight) $params[] = $totalMin - 1440;
         if ($excludeId > 0) $params[] = $excludeId;
         $rows = db_all("
             SELECT t.id, t.table_number, t.rate_per_hour, t.status,
                    (SELECT COUNT(*) FROM reservations r
-                    WHERE r.table_id = t.id AND r.reservation_date = ?
-                      AND r.status IN ('playing','confirmed')
-                      AND r.start_time < ? AND r.end_time > ?
+                    WHERE r.table_id = t.id AND r.status IN ('playing','confirmed')
+                      AND (
+                          (r.reservation_date = ? AND r.start_time < ? AND r.end_time > ?)
+                          OR (r.reservation_date = ? AND r.end_time > '24:00:00'
+                              AND (HOUR(r.end_time) * 60 + MINUTE(r.end_time)) - 1440 > ?)
+                          " . ($crossesMidnight ? "OR (r.reservation_date = ? AND (HOUR(r.start_time) * 60 + MINUTE(r.start_time)) < ?)" : "") . "
+                      )
                       " . ($excludeId > 0 ? "AND r.id <> ?" : "") . ") AS conflict
             FROM tables t
             WHERE t.status <> 'maintenance'
+              AND NOT EXISTS (SELECT 1 FROM billiard_sessions bs
+                              WHERE bs.table_id = t.id AND bs.status = 'open')
             ORDER BY t.table_number
         ", $params);
         $tables = array_map(static function ($r) {
@@ -87,8 +101,22 @@ switch ($action) {
             $end = sprintf('%02d:%02d', intdiv($totalMin, 60), $totalMin % 60);
         }
 
+        // Strict time validation (the old check only looked at the first two
+        // chars, so garbage like "99:99" or "abc" slipped through to the SQL).
+        if (!preg_match('/^\d{2}:\d{2}$/', $start) || !preg_match('/^\d{2}:\d{2}$/', $end)) {
+            json_response(422, ['ok' => false, 'message' => 'Invalid time format — use HH:MM.']);
+        }
+        [$sh, $sm] = array_map('intval', explode(':', $start));
+        [$eh, $em] = array_map('intval', explode(':', $end));
+        $startMin = $sh * 60 + $sm;
+        $endMin = $eh * 60 + $em;
+        if ($startMin > 1440 || $endMin > 2880) {
+            json_response(422, ['ok' => false, 'message' => 'Time out of range.']);
+        }
+
         if ($id > 0) {
             $cur = db_value('SELECT status FROM reservations WHERE id = ?', [$id]);
+            if ($cur === false || $cur === null) json_response(404, ['ok' => false, 'message' => 'Reservation not found.']);
             if ($cur === 'playing') json_response(422, ['ok' => false, 'message' => 'Cannot edit a reservation with an active session.']);
             if ($cur === 'completed') json_response(422, ['ok' => false, 'message' => 'Cannot edit a completed reservation.']);
         }
@@ -105,7 +133,7 @@ switch ($action) {
         if ($customer === '' || $tableId <= 0 || !$date || !$start || !$end) {
             json_response(422, ['ok' => false, 'message' => 'All required fields must be filled.']);
         }
-        if ($start >= $end) {
+        if ($endMin <= $startMin) {
             json_response(422, ['ok' => false, 'message' => 'End time must be after start time.']);
         }
         if ($downpayment < 0) {
@@ -117,14 +145,28 @@ switch ($action) {
             json_response(422, ['ok' => false, 'message' => 'This table is not available.']);
         }
 
-        // overlapping reservation check (exclude self when editing)
+        // Overlapping reservation check (exclude self when editing).
+        // Windows may cross midnight, so the check also covers the previous
+        // day's overflow bookings (end_time > 24:00) and the next day's
+        // reservations when the new window runs past midnight.
+        $prevDate = date('Y-m-d', strtotime($date . ' -1 day'));
+        $nextDate = date('Y-m-d', strtotime($date . ' +1 day'));
+        $crossesMidnight = $endMin > 1440;
+        $overlapParams = [$tableId, $date, $endMin, $startMin, $prevDate, $startMin];
+        if ($crossesMidnight) $overlapParams[] = $nextDate;
+        if ($crossesMidnight) $overlapParams[] = $endMin - 1440;
+        if ($id > 0) $overlapParams[] = $id;
         $overlap = db_value("
             SELECT COUNT(*) FROM reservations
-            WHERE table_id = ? AND reservation_date = ?
-              AND status IN ('playing','confirmed')
-              AND start_time < ? AND end_time > ?
+            WHERE table_id = ? AND status IN ('playing','confirmed')
+              AND (
+                  (reservation_date = ? AND (HOUR(start_time) * 60 + MINUTE(start_time)) < ? AND (HOUR(end_time) * 60 + MINUTE(end_time)) > ?)
+                  OR (reservation_date = ? AND end_time > '24:00:00'
+                      AND (HOUR(end_time) * 60 + MINUTE(end_time)) - 1440 > ?)
+                  " . ($crossesMidnight ? "OR (reservation_date = ? AND (HOUR(start_time) * 60 + MINUTE(start_time)) < ?)" : "") . "
+              )
               " . ($id > 0 ? "AND id <> ?" : "") . "
-        ", $id > 0 ? [$tableId, $date, $end, $start, $id] : [$tableId, $date, $end, $start]);
+        ", $overlapParams);
         if ((int)$overlap > 0) {
             json_response(409, ['ok' => false, 'message' => 'Time slot overlaps an existing reservation.']);
         }
@@ -162,6 +204,9 @@ switch ($action) {
     case 'delete': {
         $id = (int)($_POST['id'] ?? 0);
         $cur = db_value('SELECT status FROM reservations WHERE id = ?', [$id]);
+        if ($cur === false || $cur === null) {
+            json_response(404, ['ok' => false, 'message' => 'Reservation not found.']);
+        }
         if ($cur === 'playing') json_response(422, ['ok' => false, 'message' => 'Cannot delete a reservation with an active session.']);
         if ($cur === 'completed') json_response(422, ['ok' => false, 'message' => 'Cannot delete a completed reservation.']);
         db()->prepare('DELETE FROM reservations WHERE id = ?')->execute([$id]);

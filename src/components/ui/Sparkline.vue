@@ -32,8 +32,9 @@ const points = computed(() => {
   const max = Math.max(...values)
   const range = max - min || 1
   const pad = 2
+  const denom = values.length - 1 || 1
   return values.map((v, i) => ({
-    x: pad + (i / (values.length - 1)) * (props.w - pad * 2),
+    x: pad + (i / denom) * (props.w - pad * 2),
     y: pad + (1 - (v - min) / range) * (props.h - pad * 2),
   }))
 })

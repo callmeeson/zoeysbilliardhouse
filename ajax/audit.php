@@ -19,13 +19,17 @@ switch ($action) {
         $filter = "DATE(al.created_at) BETWEEN ? AND ?";
         $params = [$from, $to];
 
-        // Admins (non-superadmin) cannot see superadmin actions.
+        // Admins (non-superadmin) cannot see superadmin actions. The role is
+        // read from the snapshot stored on the log row (audit_logs.user_role),
+        // so it stays correct even after the user is deleted — the old
+        // join-based check turned NULL for deleted superadmins and leaked
+        // their actions to admins.
         if (!$isSuper) {
-            $filter .= " AND (u.role IS NULL OR u.role <> 'superadmin')";
+            $filter .= " AND (al.user_role IS NULL OR al.user_role <> 'superadmin')";
         }
         if ($aAction !== '') { $filter .= " AND al.action = ?"; $params[] = $aAction; }
         if ($q !== '') {
-            $filter .= " AND (u.username LIKE ? OR u.full_name LIKE ? OR al.detail LIKE ?)";
+            $filter .= " AND (al.user_name LIKE ? OR u.full_name LIKE ? OR al.detail LIKE ?)";
             $like = "%{$q}%";
             array_push($params, $like, $like, $like);
         }
@@ -39,9 +43,9 @@ switch ($action) {
         $offset = ($page - 1) * $pageSize;
         $rows = db_all("
             SELECT al.id, al.action, al.detail, al.created_at,
-                   COALESCE(u.username, 'System') AS username,
-                   COALESCE(u.full_name, 'System') AS full_name,
-                   COALESCE(u.role, 'system') AS role
+                   COALESCE(al.user_name, u.username, 'System') AS username,
+                   COALESCE(u.full_name, al.user_name, 'System') AS full_name,
+                   COALESCE(al.user_role, u.role, 'system') AS role
             FROM audit_logs al
             LEFT JOIN users u ON u.id = al.user_id
             WHERE $filter
@@ -57,7 +61,7 @@ switch ($action) {
             FROM audit_logs al
             LEFT JOIN users u ON u.id = al.user_id
             WHERE DATE(al.created_at) BETWEEN ? AND ?
-            " . ($isSuper ? '' : " AND (u.role IS NULL OR u.role <> 'superadmin')") . "
+            " . ($isSuper ? '' : " AND (al.user_role IS NULL OR al.user_role <> 'superadmin')") . "
         ", [$from, $to]);
 
         json_response(200, [

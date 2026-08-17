@@ -5,6 +5,7 @@ import { reportsApi } from '@/api/services'
 export const useReportsStore = defineStore('reports', () => {
   const summary = ref(null)
   const transactions = ref([])
+  const transactionsTotal = ref(0)
   const products = ref([])
   const inventory = ref(null)
   const cashiers = ref([])
@@ -34,9 +35,10 @@ export const useReportsStore = defineStore('reports', () => {
   async function fetchTransactions() {
     loading.value = true
     try {
-      const response = await reportsApi.transactions({ ...filters.value })
+      const response = await reportsApi.transactions({ ...filters.value, page_size: 500 })
       if (response.data.ok) {
         transactions.value = response.data.transactions
+        transactionsTotal.value = response.data.total ?? transactions.value.length
       }
       return response.data
     } finally {
@@ -113,6 +115,7 @@ export const useReportsStore = defineStore('reports', () => {
   return {
     summary,
     transactions,
+    transactionsTotal,
     products,
     inventory,
     cashiers,

@@ -82,7 +82,9 @@ CREATE TABLE customers (
     membership ENUM('regular','silver','gold','platinum') NOT NULL DEFAULT 'regular',
     points INT NOT NULL DEFAULT 0,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    loyalty_stamps INT NOT NULL DEFAULT 0,
+    loyalty_completed INT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB;
 
 -- -----------------------------------------------------
@@ -101,8 +103,10 @@ CREATE TABLE billiard_sessions (
     extended_hours DECIMAL(5,2) NOT NULL DEFAULT 0.00,
     points TINYINT NOT NULL DEFAULT 0,
     status ENUM('open','closed','void') NOT NULL DEFAULT 'open',
+    void_reason VARCHAR(500) NULL,
     user_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    free_hour_used TINYINT(1) NOT NULL DEFAULT 0,
     CONSTRAINT fk_sesh_table FOREIGN KEY (table_id) REFERENCES tables(id) ON DELETE CASCADE,
     CONSTRAINT fk_sesh_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT fk_sesh_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
@@ -223,6 +227,8 @@ CREATE TABLE promos (
 CREATE TABLE audit_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NULL,
+    user_name VARCHAR(100) NULL,
+    user_role VARCHAR(20) NULL,
     action VARCHAR(50) NOT NULL,
     detail TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -239,6 +245,25 @@ CREATE TABLE customer_stamps (
     awarded_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_customer_stamp_date (customer_id, stamp_date)
+) ENGINE=InnoDB;
+
+-- -----------------------------------------------------
+-- login_attempts (brute-force throttle: per IP+username and per IP)
+-- -----------------------------------------------------
+CREATE TABLE login_attempts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ip VARCHAR(45) NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    attempted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_login_attempts_lookup (ip, username, attempted_at)
+) ENGINE=InnoDB;
+
+-- -----------------------------------------------------
+-- seq_sales_reference (atomic sale reference counter)
+-- -----------------------------------------------------
+CREATE TABLE seq_sales_reference (
+    id TINYINT PRIMARY KEY,
+    val BIGINT NOT NULL
 ) ENGINE=InnoDB;
 
 -- -----------------------------------------------------

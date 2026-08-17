@@ -186,13 +186,6 @@
             </div>
             <div class="rp-sub">{{ item.qty }} × {{ money(item.price) }}</div>
           </div>
-          <div v-if="receipt.billiard?.session_id" class="rp-item">
-            <div class="rp-line">
-              <span>Billiard · Table {{ receipt.billiard.table_number }}</span>
-              <span>{{ receipt.billiard.amount > 0 ? money(receipt.billiard.amount) : 'PAID (₱' + Number(receipt.billiard.prepaid || 0).toFixed(2) + ')' }}</span>
-            </div>
-            <div class="rp-sub">{{ receipt.billiard.hours }} hr{{ receipt.billiard.hours === 1 ? '' : 's' }}</div>
-          </div>
           <div class="rp-dash"></div>
           <div class="rp-line"><span>Subtotal</span><span>{{ money(receipt.subtotal) }}</span></div>
           <div v-if="receipt.discount > 0" class="rp-line"><span>Discount</span><span>−{{ money(receipt.discount) }}</span></div>
@@ -220,6 +213,7 @@ import {
 import { useCartStore } from '@/stores/cart'
 import { useProductsStore } from '@/stores/products'
 import { useSettingsStore } from '@/stores/settings'
+import { toast } from '@/utils/dialogs'
 import Modal from '@/components/ui/Modal.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
@@ -279,21 +273,25 @@ onMounted(async () => {
 })
 
 const handleCheckout = async () => {
-  if (cart.isEmpty) return
+  if (cart.isEmpty) {
+    toast('Add at least one item to the cart.')
+    return
+  }
   if (cart.tendered < cart.total) {
-    alert('Tendered amount is less than the total.')
+    toast('Tendered amount is less than the total.')
     return
   }
   const res = await cart.checkout()
   if (res.ok) {
     receipt.value = res.sale
     productsStore.fetchProducts()
+    toast(`Sale ${res.sale?.reference || ''} completed.`, 'success')
     if (autoPrint.value) {
       // let the preview modal render, then send to the thermal printer
       await nextTick()
       setTimeout(() => window.print(), 350)
     }
-  } else alert(res.message)
+  } else toast(res.message)
 }
 
 const newSale = () => {

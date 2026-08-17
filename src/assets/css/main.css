@@ -25,14 +25,14 @@
 }
 
 :root {
-  --zb-canvas: #f8fafc;
-  --zb-panel: #ffffff;
-  --zb-elevated: #ffffff;
-  --zb-line: #e2e8f0;
-  --zb-line-strong: #cbd5e1;
-  --zb-ink: #0f172a;
-  --zb-muted: #64748b;
-  --zb-faint: #94a3b8;
+  --zb-canvas: #e9edf2;
+  --zb-panel: #fdfdfd;
+  --zb-elevated: #fdfdfd;
+  --zb-line: #e4e8ee;
+  --zb-line-strong: #cdd4de;
+  --zb-ink: #334155;
+  --zb-muted: #5d6b80;
+  --zb-faint: #8a99ad;
 }
 
 .dark {

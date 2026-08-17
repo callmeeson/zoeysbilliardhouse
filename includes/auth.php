@@ -17,6 +17,11 @@ function is_json_request(): bool
 /**
  * Guards a page: redirects to login when not authenticated.
  * JSON/SPA requests get a clean 401 instead of a redirect.
+ *
+ * Also re-validates the account on every request against the DB, so a user
+ * who is deactivated, deleted, or demoted loses access immediately (the old
+ * code trusted the session snapshot forever, leaving stale privileges until
+ * the session expired).
  */
 function require_login(): void
 {
@@ -26,6 +31,20 @@ function require_login(): void
         }
         header('Location: ' . BASE_URL . 'index.php');
         exit;
+    }
+    $u = db_row('SELECT id, role, is_active FROM users WHERE id = ?', [$_SESSION['user_id']]);
+    if (!$u || (int)$u['is_active'] !== 1) {
+        logout();
+        if (is_json_request()) {
+            json_response(401, ['ok' => false, 'message' => 'Your account has been deactivated. Please contact the administrator.']);
+        }
+        header('Location: ' . BASE_URL . 'index.php');
+        exit;
+    }
+    // Keep the session role in sync with the live role (e.g. demoted admins
+    // lose their admin access on the very next request).
+    if (($_SESSION['role'] ?? '') !== $u['role']) {
+        $_SESSION['role'] = $u['role'];
     }
 }
 
@@ -92,22 +111,28 @@ function current_user(): ?array
 }
 
 /**
- * Logs a user in from username + password.
+ * Attempts a login and reports the outcome:
+ *   'ok'       — credentials valid and account active (session started)
+ *   'disabled' — credentials valid but the account has been disabled
+ *   'invalid'  — username/password mismatch or unknown user
  */
-function attempt_login(string $username, string $password): bool
+function attempt_login(string $username, string $password): string
 {
-    $user = db_row('SELECT * FROM users WHERE username = ? AND is_active = 1 LIMIT 1', [$username]);
-    if ($user && password_verify($password, $user['password'])) {
-        session_regenerate_id(true);
-        $_SESSION['user_id'] = (int)$user['id'];
-        $_SESSION['username'] = $user['username'];
-        $_SESSION['full_name'] = $user['full_name'];
-        $_SESSION['role'] = $user['role'];
-        db()->prepare('UPDATE users SET last_login = NOW() WHERE id = ?')->execute([$user['id']]);
-        audit_log('login', 'User logged in', (int)$user['id']);
-        return true;
+    $user = db_row('SELECT * FROM users WHERE username = ? LIMIT 1', [$username]);
+    if (!$user || !password_verify($password, $user['password'])) {
+        return 'invalid';
     }
-    return false;
+    if ((int)$user['is_active'] !== 1) {
+        return 'disabled';
+    }
+    session_regenerate_id(true);
+    $_SESSION['user_id'] = (int)$user['id'];
+    $_SESSION['username'] = $user['username'];
+    $_SESSION['full_name'] = $user['full_name'];
+    $_SESSION['role'] = $user['role'];
+    db()->prepare('UPDATE users SET last_login = NOW() WHERE id = ?')->execute([$user['id']]);
+    audit_log('login', 'User logged in', (int)$user['id']);
+    return 'ok';
 }
 
 function logout(): void
@@ -120,23 +145,28 @@ function logout(): void
     session_destroy();
 }
 
-function role_badge(string $role): string
-{
-    return match ($role) {
-        'superadmin' => '<span class="badge bg-dark">Super Admin</span>',
-        'admin'      => '<span class="badge bg-danger">Admin</span>',
-        default      => '<span class="badge bg-secondary">Staff</span>',
-    };
-}
-
 /**
  * Writes an entry to the audit log.
+ * Snapshot of the username + role is stored so the entry stays attributable
+ * even after the user is deleted (the old join-based view leaked deleted
+ * superadmin actions to admins because the join turned NULL).
  */
 function audit_log(string $action, ?string $detail = null, ?int $userId = null): void
 {
     try {
-        db()->prepare('INSERT INTO audit_logs (user_id, action, detail) VALUES (?,?,?)')
-            ->execute([$userId ?? ($_SESSION['user_id'] ?? null), $action, $detail]);
+        $uid = $userId ?? ($_SESSION['user_id'] ?? null);
+        $name = null;
+        $role = null;
+        if ($uid !== null) {
+            static $identity = [];
+            if (!array_key_exists($uid, $identity)) {
+                $u = db_row('SELECT username, role FROM users WHERE id = ?', [$uid]);
+                $identity[$uid] = $u ? [$u['username'], $u['role']] : [null, null];
+            }
+            [$name, $role] = $identity[$uid];
+        }
+        db()->prepare('INSERT INTO audit_logs (user_id, action, detail, user_name, user_role) VALUES (?,?,?,?,?)')
+            ->execute([$uid, $action, $detail, $name, $role]);
     } catch (Throwable $e) {
         // audit logging must never break the main flow
     }

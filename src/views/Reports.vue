@@ -213,7 +213,7 @@
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4">
             <div>
               <h2 class="text-sm font-semibold text-ink">Transactions</h2>
-              <p class="mt-0.5 text-xs text-muted">{{ store.transactions.length }} sale{{ store.transactions.length === 1 ? '' : 's' }} in range</p>
+              <p class="mt-0.5 text-xs text-muted">{{ store.transactionsTotal }} sale{{ store.transactionsTotal === 1 ? '' : 's' }} in range</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <input v-model="txnSearch" type="search" placeholder="Search ref, cashier, method..." class="form-input w-48 py-1.5 text-xs" />
@@ -460,7 +460,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Banknote, PiggyBank, ReceiptText, Percent } from '@lucide/vue'
-import { confirmBox } from '@/utils/dialogs'
+import { confirmBox, toast } from '@/utils/dialogs'
 import { useReportsStore } from '@/stores/reports'
 import { useAuthStore } from '@/stores/auth'
 import Modal from '@/components/ui/Modal.vue'
@@ -589,7 +589,8 @@ const viewDetails = (t) => { details.value = t }
 const voidTxn = async (t) => {
   if (!(await confirmBox({ title: 'Void transaction?', message: `Void transaction ${t.reference}? This cannot be undone.`, danger: true }))) return
   const res = await store.voidTransaction(t.id)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast('Transaction voided.', 'success')
+  else toast(res.message)
 }
 
 /* --- Charts --- */
@@ -716,7 +717,16 @@ const exportMonthly = () => {
 }
 const exportTransactions = () => {
   const list = store.transactions
-  const csv = ['Reference,Date,Cashier,Type,Total,Status', ...list.map((t) => [t.reference, t.created_at, t.cashier, t.billiard_amount > 0 ? 'Billiard' : 'POS', t.total, t.status].map(escCsv).join(','))].join('\n')
+  const fmt = (dt) => {
+    const d = new Date(dt)
+    if (isNaN(d)) return ''
+    const pad = (n) => String(n).padStart(2, '0')
+    const h = d.getHours()
+    const hour12 = h % 12 === 0 ? 12 : h % 12
+    const ampm = h < 12 ? 'AM' : 'PM'
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hour12}:${pad(d.getMinutes())} ${ampm}`
+  }
+  const csv = ['Reference,Date,Cashier,Type,Total,Status', ...list.map((t) => [t.reference, fmt(t.created_at), t.cashier, t.billiard_amount > 0 ? 'Billiard' : 'POS', t.total, t.status].map(escCsv).join(','))].join('\n')
   downloadCsv(csv, `transactions${rangeName()}.csv`)
 }
 const exportProducts = () => {

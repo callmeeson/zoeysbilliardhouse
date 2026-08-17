@@ -9,16 +9,23 @@ switch ($action) {
 
     case 'search': {
         $q = trim($_GET['q'] ?? '');
-        $sql = "SELECT id, name, phone, loyalty_stamps, loyalty_completed FROM customers WHERE is_active = 1";
-        $params = [];
+        $periodStart = shop_open_period_start(time());
+        $sql = "SELECT c.id, c.name, c.phone, c.loyalty_stamps, c.loyalty_completed,
+                       (SELECT COUNT(*) FROM customer_stamps cs WHERE cs.customer_id = c.id AND created_at >= ?) AS stamps_since_period
+                FROM customers c WHERE c.is_active = 1";
+        $params = $periodStart > 0 ? [date('Y-m-d H:i:s', $periodStart)] : ['9999-12-31 23:59:59'];
         if ($q !== '') {
-            $sql .= " AND (name LIKE ? OR phone LIKE ?)";
-            $params = [like($q), like($q)];
+            $sql .= " AND (c.name LIKE ? OR c.phone LIKE ?)";
+            array_push($params, like($q), like($q));
         }
-        $sql .= " ORDER BY name LIMIT 20";
+        $sql .= " ORDER BY c.name LIMIT 20";
         $rows = db_all($sql, $params);
         foreach ($rows as &$r) {
             $r['initials'] = initials($r['name']);
+            $r['stamps_usable'] = $periodStart > 0
+                ? max(0, (int)$r['loyalty_stamps'] - (int)$r['stamps_since_period'])
+                : (int)$r['loyalty_stamps'];
+            unset($r['stamps_since_period']);
         }
         unset($r);
         json_response(200, ['ok' => true, 'customers' => $rows]);
@@ -26,7 +33,7 @@ switch ($action) {
     break;
 
     case 'save': {
-        if (!is_admin()) json_response(403, ['ok' => false, 'message' => 'Access denied. Admins only.']);
+        require_admin();
         $id = (int)($_POST['id'] ?? 0);
         $name = trim($_POST['name'] ?? '');
         $phone = trim($_POST['phone'] ?? '');
@@ -45,7 +52,7 @@ switch ($action) {
     break;
 
     case 'adjust_stamps': {
-        if (!is_superadmin()) json_response(403, ['ok' => false, 'message' => 'Access denied. Superadmin only.']);
+        require_superadmin();
         $id = (int)($_POST['customer_id'] ?? 0);
         $new = max(0, (int)($_POST['stamps'] ?? 0));
         $c = db_row('SELECT id, name, loyalty_stamps FROM customers WHERE id = ?', [$id]);
@@ -57,12 +64,15 @@ switch ($action) {
     break;
 
     case 'delete': {
-        if (!is_admin()) json_response(403, ['ok' => false, 'message' => 'Access denied. Admins only.']);
+        require_admin();
         $id = (int)($_POST['id'] ?? 0);
         $c = db_row('SELECT id, name FROM customers WHERE id = ?', [$id]);
         if (!$c) json_response(404, ['ok' => false, 'message' => 'Customer not found.']);
         if (db_value('SELECT COUNT(*) FROM billiard_sessions WHERE customer_id = ? AND status = "open"', [$id]) > 0) {
             json_response(422, ['ok' => false, 'message' => 'This customer has an active session. End it first.']);
+        }
+        if (db_value('SELECT COUNT(*) FROM reservations WHERE customer_id = ? AND status IN ("playing","confirmed") AND reservation_date >= CURDATE()', [$id]) > 0) {
+            json_response(422, ['ok' => false, 'message' => 'This customer has upcoming reservations. Cancel them first.']);
         }
         db()->prepare('UPDATE customers SET is_active = 0 WHERE id = ?')->execute([$id]);
         audit_log('customer_delete', "Customer '{$c['name']}' (#{$id}) deleted");

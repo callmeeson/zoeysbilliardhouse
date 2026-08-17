@@ -158,7 +158,7 @@
           <div>
             <div class="text-sm font-semibold text-ink"><Stamp :size="14" class="mr-1 inline text-brand-gold-strong" />{{ startForm.selectedCustomer.name }} — {{ loyalty }}/10 stamps</div>
             <div class="text-xs text-muted">
-              {{ canClaimFree ? '10 stamps reached — claim a free hour of play!' : (loyalty >= 10 ? 'Claim requires at least 1 hour availed.' : (10 - loyalty) + ' more stamp' + (10 - loyalty === 1 ? '' : 's') + ' to earn a free hour (play 1+ hr/day).') }}
+              {{ canClaimFree ? '10 stamps reached — claim a free hour of play!' : (stampEarnedToday ? 'Stamp earned this open period — redeemable from the next shop opening.' : (loyalty >= 10 ? 'Claim requires at least 1 hour availed.' : (10 - loyalty) + ' more stamp' + (10 - loyalty === 1 ? '' : 's') + ' to earn a free hour (play 1+ hr/day).')) }}
             </div>
           </div>
           <button type="button" role="switch" aria-checked="startForm.freeHour" class="relative h-5 w-9 shrink-0 rounded-full transition-colors duration-150 disabled:opacity-40" :class="startForm.freeHour ? 'bg-brand-green' : 'bg-line-strong'" :disabled="!canClaimFree" @click="startForm.freeHour = !startForm.freeHour">
@@ -441,7 +441,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { confirmBox } from '@/utils/dialogs'
+import { confirmBox, toast } from '@/utils/dialogs'
 import {
   Play, Star, Music4, Home, Plus, RefreshCw, SlidersHorizontal, Loader2, AlertTriangle, Table2,
   Search, Users, Percent, Stamp,
@@ -541,7 +541,9 @@ const promoEndText = computed(() => activePromo.value?.end_time || '—')
 // start summary
 const startTotal = computed(() => (startTable.value ? startTable.value.rate * startForm.value.hours : 0))
 const loyalty = computed(() => startForm.value.selectedCustomer?.loyalty_stamps || 0)
-const canClaimFree = computed(() => !!startForm.value.selectedCustomer && loyalty.value >= 10 && startForm.value.hours >= 1)
+const stampsUsable = computed(() => startForm.value.selectedCustomer?.stamps_usable ?? loyalty.value)
+const stampEarnedToday = computed(() => loyalty.value >= 10 && stampsUsable.value < 10)
+const canClaimFree = computed(() => !!startForm.value.selectedCustomer && stampsUsable.value >= 10 && startForm.value.hours >= 1)
 const startFree = computed(() => (canClaimFree.value && startForm.value.freeHour ? startTable.value.rate : 0))
 const startBilled = computed(() => Math.max(0, startTotal.value - startFree.value))
 const startDiscount = computed(() => (startForm.value.promo && activePromo.value ? Math.round(startBilled.value * (activePromo.value.discount_percent / 100) * 100) / 100 : 0))
@@ -611,7 +613,14 @@ function selectCustomer(c) {
 }
 
 async function confirmStart() {
-  if (startForm.value.payment < startDue.value - 0.001) return
+  if (startForm.value.payment < startDue.value - 0.001) {
+    toast('Payment must cover the total due.')
+    return
+  }
+  if (startForm.value.isWalkIn && !startForm.value.walkin_name.trim()) {
+    toast('Walk-in name is required.')
+    return
+  }
   submitting.value = true
   try {
     const body = {
@@ -625,11 +634,15 @@ async function confirmStart() {
     }
     const res = await store.startSession(body)
     if (res.ok) {
+      const startedNumber = startTable.value?.number
       await new Promise((r) => setTimeout(r, 800))
       startTable.value = null
+      toast(`Session started on ${startedNumber || 'table'}.`, 'success')
     } else {
-      alert(res.message)
+      toast(res.message)
     }
+  } catch (e) {
+    toast(e.response?.data?.message || e.message || 'Failed to start session')
   } finally {
     submitting.value = false
   }
@@ -647,6 +660,14 @@ const openVoid = (table) => {
 const hasPrepaid = (table) => table.session && Number(table.session.prepaid) > 0
 
 const submitExtendSession = async () => {
+  if (!extendForm.value.hours || extendForm.value.hours < 1) {
+    toast('Hours must be at least 1.')
+    return
+  }
+  if (extendForm.value.payment < extendDue.value - 0.001) {
+    toast('Payment must cover the total due.')
+    return
+  }
   loading.value = true
   try {
     const res = await store.extendSession({
@@ -655,8 +676,9 @@ const submitExtendSession = async () => {
     })
     if (res.ok) {
       activeExtendTable.value = null
+      toast('Session extended.', 'success')
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     loading.value = false
@@ -697,11 +719,12 @@ const submitEndSession = async () => {
     if (res.ok) {
       activeEndTable.value = null
       receipt.value = res.session || null
+      toast('Session ended.', 'success')
     } else {
-      alert(res.message || 'Could not end the session. Please try again.')
+      toast(res.message || 'Could not end the session. Please try again.')
     }
   } catch (e) {
-    alert('Could not end the session. Please try again.')
+    toast('Could not end the session. Please try again.')
   } finally {
     loading.value = false
   }
@@ -709,27 +732,35 @@ const submitEndSession = async () => {
 
 const handleClaimFree = async (table) => {
   const res = await store.claimFreeHour(table.session?.id)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast('Free hour claimed.', 'success')
+  else toast(res.message)
 }
 
 const handleMaintenance = async (table) => {
   const res = await store.setMaintenance(table.id)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast(`Table ${table.table_number} marked for maintenance.`, 'success')
+  else toast(res.message)
 }
 
 const setStatus = async (table, status) => {
   const res = await store.setStatus(table.id, status)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast(`Table ${table.table_number} is now ${status}.`, 'success')
+  else toast(res.message)
 }
 
 const submitVoidSession = async () => {
+  if (!voidReason.value.trim()) {
+    toast('A reason is required to void a session.')
+    return
+  }
   loading.value = true
   try {
     const res = await store.cancelSession(activeVoidTable.value.session?.id, voidReason.value)
     if (res.ok) {
       activeVoidTable.value = null
+      toast('Session voided.', 'success')
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     loading.value = false
@@ -746,13 +777,22 @@ const openEditModal = (table) => {
 }
 
 const submitTableForm = async () => {
+  if (!editForm.value.table_number.trim()) {
+    toast('Table number is required.')
+    return
+  }
+  if (!editForm.value.rate_per_hour || editForm.value.rate_per_hour < 0) {
+    toast('Rate per hour must be 0 or more.')
+    return
+  }
   loading.value = true
   try {
     const res = await store.saveTable({ ...editForm.value })
     if (res.ok) {
       showEditModal.value = false
+      toast('Table saved.', 'success')
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     loading.value = false
@@ -764,8 +804,9 @@ const deleteTable = async () => {
   const res = await store.deleteTable(editForm.value.id)
   if (res.ok) {
     showEditModal.value = false
+    toast('Table deleted.', 'success')
   } else {
-    alert(res.message)
+    toast(res.message)
   }
 }
 

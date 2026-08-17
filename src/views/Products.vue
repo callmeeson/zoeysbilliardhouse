@@ -62,8 +62,8 @@
       </select>
       <div class="ml-auto flex gap-2">
         <button class="btn btn-outline" @click="exportProducts"><i class="bi bi-download"></i> Export</button>
-        <button class="btn btn-outline" @click="openImport"><i class="bi bi-upload"></i> Import</button>
-        <button class="btn btn-primary" @click="openAdd"><i class="bi bi-plus-lg"></i> Add Product</button>
+        <button v-if="authStore.isAdmin" class="btn btn-outline" @click="openImport"><i class="bi bi-upload"></i> Import</button>
+        <button v-if="authStore.isAdmin" class="btn btn-primary" @click="openAdd"><i class="bi bi-plus-lg"></i> Add Product</button>
       </div>
     </div>
 
@@ -146,11 +146,11 @@
               <button type="button" class="icon-btn h-9 w-9 shrink-0" title="Add supplier" @click="openAddSupplier"><i class="bi bi-plus-lg"></i></button>
             </div>
           </div>
-          <div class="mb-3">
+          <div v-if="authStore.isAdmin" class="mb-3">
             <label class="form-label">Selling Price (₱)</label>
             <input v-model.number="form.selling_price" type="number" min="0" step="0.01" class="form-input" required />
           </div>
-          <div class="mb-3">
+          <div v-if="authStore.isAdmin" class="mb-3">
             <label class="form-label">Buying Price (₱)</label>
             <input v-model.number="form.buying_price" type="number" min="0" step="0.01" class="form-input" required />
           </div>
@@ -248,7 +248,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { confirmBox } from '@/utils/dialogs'
+import { confirmBox, toast } from '@/utils/dialogs'
 import { productsApi } from '@/api/services'
 import { useProductsStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
@@ -329,8 +329,9 @@ const exportProducts = async () => {
     a.download = `products-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
+    toast('Products exported.', 'success')
   } catch (e) {
-    alert('Export failed: ' + (e.message || 'Please try again.'))
+    toast('Export failed: ' + (e.message || 'Please try again.'))
   }
 }
 
@@ -350,47 +351,66 @@ const onImportFile = async (e) => {
     fd.append('file', file)
     const res = await productsApi.importProducts(fd)
     importResult.value = { imported: res.data.ok, message: res.data.message || 'Import failed.', errors: res.data.errors || [] }
-    if (res.data.ok) productsStore.fetchProducts()
+    if (res.data.ok) {
+      productsStore.fetchProducts()
+      toast(res.data.message || 'Products imported.', 'success')
+    } else {
+      toast(res.data.message || 'Import failed.')
+    }
   } catch (err) {
-    importResult.value = { imported: false, message: 'Import failed: ' + (err.message || 'Please try again.'), errors: [] }
+    const msg = err.response?.data?.message || err.message || 'Please try again.'
+    importResult.value = { imported: false, message: 'Import failed: ' + msg, errors: [] }
+    toast('Import failed: ' + msg)
   } finally {
     loading.value = false
   }
 }
 
 const submitForm = async () => {
+  if (!form.value.name.trim()) return toast('Product name is required.')
+  if (form.value.selling_price < 0) return toast('Selling price cannot be negative.')
+  if (form.value.buying_price < 0) return toast('Buying price cannot be negative.')
+  if (form.value.stock < 0) return toast('Stock cannot be negative.')
+  if (form.value.low_stock < 0) return toast('Low stock alert cannot be negative.')
   loading.value = true
   try {
     const data = { ...form.value }
     data.category_id = form.value.category_id || 0
     const res = await productsStore.saveProduct(data)
-    if (res.ok) showForm.value = false
-    else alert(res.message)
+    if (res.ok) {
+      showForm.value = false
+      toast('Product saved.', 'success')
+    } else toast(res.message)
   } finally {
     loading.value = false
   }
 }
 
 const submitRestock = async () => {
+  if (!restockForm.value.qty || restockForm.value.qty < 1) return toast('Quantity must be at least 1.')
   loading.value = true
   try {
     const res = await productsStore.restock({ id: restockProduct.value.id, ...restockForm.value })
-    if (res.ok) showRestock.value = false
-    else alert(res.message)
+    if (res.ok) {
+      showRestock.value = false
+      toast(`Restocked +${restockForm.value.qty} ${restockProduct.value.name}.`, 'success')
+    } else toast(res.message)
   } finally {
     loading.value = false
   }
 }
 
 const submitCategory = async () => {
+  if (!categoryName.value.trim()) return toast('Category name is required.')
   loading.value = true
   try {
     const res = await productsStore.saveCategory(categoryName.value)
     if (res.ok) {
       showAddCategory.value = false
       form.value.category_id = res.id
+      toast('Category added.', 'success')
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     loading.value = false
@@ -398,14 +418,16 @@ const submitCategory = async () => {
 }
 
 const submitSupplier = async () => {
+  if (!supplierName.value.trim()) return toast('Supplier name is required.')
   loading.value = true
   try {
     const res = await productsStore.saveSupplier(supplierName.value)
     if (res.ok) {
       showAddSupplier.value = false
       form.value.supplier_id = res.id
+      toast('Supplier added.', 'success')
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     loading.value = false
@@ -415,7 +437,8 @@ const submitSupplier = async () => {
 const removeProduct = async (p) => {
   if (!(await confirmBox({ title: 'Delete product?', message: `Delete ${p.name}? This cannot be undone.`, danger: true }))) return
   const res = await productsStore.deleteProduct(p.id)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast('Product deleted.', 'success')
+  else toast(res.message)
 }
 
 const money = (amount) => '₱' + Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })

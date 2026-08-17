@@ -27,7 +27,7 @@ import Sparkline from './Sparkline.vue'
 defineProps({
   label: { type: String, required: true },
   value: { type: [String, Number], required: true },
-  icon: { type: Object, required: true },
+  icon: { type: [Object, Function], required: true },
   iconClass: { type: String, default: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' },
   delta: { type: Number, default: null },
   spark: { type: Array, default: () => [] },

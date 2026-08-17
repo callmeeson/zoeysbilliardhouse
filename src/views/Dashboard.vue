@@ -288,7 +288,8 @@ const chartPoints = computed(() => {
   const min = Math.min(...vals)
   const max = Math.max(...vals)
   const range = max - min || 1
-  return vals.map((v, i) => ({ x: (i / (vals.length - 1)) * 100, y: 39 - ((v - min) / range) * 36 }))
+  const denom = vals.length - 1 || 1
+  return vals.map((v, i) => ({ x: (i / denom) * 100, y: 39 - ((v - min) / range) * 36 }))
 })
 const trendLine = computed(() => chartPoints.value.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' '))
 const trendArea = computed(() => (chartPoints.value.length ? `${trendLine.value} L100,40 L0,40 Z` : ''))

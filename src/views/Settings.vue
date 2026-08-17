@@ -8,7 +8,7 @@
         </div>
         <div>
           <h1 class="text-xl font-bold tracking-tight text-ink">Settings</h1>
-          <p class="text-sm text-muted">Business info, promos, shifts and backup</p>
+          <p class="text-sm text-muted">Business info, promos, shifts, email and backup</p>
         </div>
       </div>
     </div>
@@ -16,7 +16,7 @@
     <!-- Tabs -->
     <div class="no-print mb-4 flex w-fit flex-wrap gap-1.5 rounded-2xl border border-line bg-panel p-1.5 shadow-card">
       <button
-        v-for="t in tabs"
+        v-for="t in visibleTabs"
         :key="t.key"
         class="btn"
         :class="tab === t.key ? 'bg-brand-green text-white shadow-sm' : 'bg-transparent text-muted hover:bg-elevated hover:text-ink'"
@@ -96,6 +96,41 @@
             <div class="rp-dash"></div>
             <div class="rp-foot">THANK YOU! COME AGAIN</div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ CATEGORIES TAB ============ -->
+    <div v-if="tab === 'categories'">
+      <div class="card overflow-hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4">
+          <div>
+            <h2 class="text-sm font-semibold text-ink">Categories</h2>
+            <p class="mt-0.5 text-xs text-muted">Product categories used across the register</p>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="openCategory(null)"><i class="bi bi-plus-lg"></i> Add Category</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr><th>Name</th><th>Products</th><th class="text-right">Actions</th></tr>
+            </thead>
+            <tbody>
+              <tr v-if="!categories.length">
+                <td colspan="3" class="py-10 text-center text-muted">No categories yet. Add one to group products.</td>
+              </tr>
+              <tr v-for="c in categories" :key="c.id">
+                <td class="font-medium text-ink">{{ c.name }}</td>
+                <td class="text-muted">{{ c.product_count }}</td>
+                <td class="text-right">
+                  <div class="flex justify-end gap-1.5">
+                    <button class="btn btn-ghost btn-sm" @click="openCategory(c)"><i class="bi bi-pencil"></i> Rename</button>
+                    <button class="btn btn-danger-soft btn-sm" @click="removeCategory(c)"><i class="bi bi-trash"></i></button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -180,6 +215,48 @@
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ EMAIL TAB ============ -->
+    <div v-if="tab === 'email'" class="grid gap-4 lg:grid-cols-2">
+      <div class="card">
+        <div class="border-b border-line px-5 py-4">
+          <h2 class="text-sm font-semibold text-ink">Resend Email API</h2>
+          <p class="mt-0.5 text-xs text-muted">Resend.com account — used to send emails (receipts, notifications)</p>
+        </div>
+        <div class="p-5">
+          <div class="space-y-4">
+            <div>
+              <label class="form-label">API Key</label>
+              <input v-model="form.resend_api_key" type="password" class="form-input" placeholder="re_..." autocomplete="off" />
+              <p class="mt-1.5 text-xs text-muted">Get it at resend.com → API Keys. Leave as-is (masked) to keep the current key.</p>
+            </div>
+            <div>
+              <label class="form-label">From (Sender) Email</label>
+              <input v-model="form.resend_from_email" type="email" class="form-input" placeholder="no-reply@yourdomain.com" />
+              <p class="mt-1.5 text-xs text-muted">The address emails are sent from. Must be a verified sender in your Resend account.</p>
+            </div>
+          </div>
+          <button class="btn btn-primary mt-5 w-full" @click="saveSettings" :disabled="loading || sending">
+            <i class="bi bi-check-lg"></i>{{ loading ? 'Saving...' : 'Save Email Settings' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="border-b border-line px-5 py-4">
+          <h2 class="text-sm font-semibold text-ink">Send Test Email</h2>
+          <p class="mt-0.5 text-xs text-muted">Verify the API key and sender work end-to-end</p>
+        </div>
+        <div class="p-5">
+          <label class="form-label">Recipient</label>
+          <input v-model="testEmail" type="email" class="form-input" placeholder="you@gmail.com" />
+          <button class="btn btn-primary mt-4 w-full" :disabled="sending || !testEmail.trim()" @click="sendTest">
+            <i class="bi bi-send"></i>{{ sending ? 'Sending...' : 'Send Test Email' }}
+          </button>
+          <p class="mt-3 text-xs text-muted">The test email arrives in the recipient inbox — check spam if it doesn't show up.</p>
         </div>
       </div>
     </div>
@@ -274,21 +351,40 @@
         </div>
       </form>
     </Modal>
+
+    <!-- Category form modal -->
+    <Modal v-if="showCategoryForm" :title="categoryForm.id ? 'Rename Category' : 'Add Category'" @close="showCategoryForm = false">
+      <form @submit.prevent="submitCategory">
+        <div class="mb-3">
+          <label class="form-label">Category Name</label>
+          <input v-model="categoryForm.name" type="text" class="form-input" placeholder="e.g. Drinks" required />
+        </div>
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-outline flex-1" @click="showCategoryForm = false">Cancel</button>
+          <button type="submit" class="btn btn-primary flex-1" :disabled="loading">{{ loading ? 'Saving...' : 'Save Category' }}</button>
+        </div>
+      </form>
+    </Modal>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { confirmBox } from '@/utils/dialogs'
+import { confirmBox, toast } from '@/utils/dialogs'
 import { useSettingsStore } from '@/stores/settings'
-import { promosApi, settingsApi } from '@/api/services'
+import { useAuthStore } from '@/stores/auth'
+import { promosApi, productsApi, settingsApi } from '@/api/services'
 import Modal from '@/components/ui/Modal.vue'
 
 const store = useSettingsStore()
+const auth = useAuthStore()
 const loading = ref(false)
 const savingLogo = ref(false)
 const showShiftForm = ref(false)
 const showPromoForm = ref(false)
+const showCategoryForm = ref(false)
+const categories = ref([])
+const categoryForm = ref({ id: 0, name: '' })
 const baseUrl = import.meta.env.BASE_URL
 const logoInput = ref(null)
 const tab = ref('business')
@@ -296,12 +392,18 @@ const sysinfo = ref(null)
 
 const tabs = [
   { key: 'business', label: 'Business & Logo', icon: 'bi bi-shop' },
+  { key: 'categories', label: 'Categories', icon: 'bi bi-tags' },
   { key: 'promos', label: 'Promos', icon: 'bi bi-tag' },
   { key: 'shifts', label: 'Shifts', icon: 'bi bi-clock-history' },
+  { key: 'email', label: 'Email', icon: 'bi bi-envelope' },
   { key: 'backup', label: 'Backup', icon: 'bi bi-database-down' },
 ]
 
-const form = reactive({ business_name: '', business_address: '', business_phone: '', business_logo: '' })
+const visibleTabs = computed(() => (auth.isAdmin ? tabs : tabs.filter((t) => t.key !== 'categories')))
+
+const form = reactive({ business_name: '', business_address: '', business_phone: '', business_logo: '', resend_api_key: '', resend_from_email: '' })
+const testEmail = ref('')
+const sending = ref(false)
 const shiftForm = ref({ id: 0, name: '', start_time: '08:00', end_time: '17:00', next_day: false })
 const promos = ref([])
 const promoForm = ref({ id: 0, name: '', discount_percent: 50, start_time: '08:00', end_time: '12:00', is_active: true })
@@ -323,6 +425,7 @@ onMounted(async () => {
   Object.assign(form, store.settings)
   store.fetchShifts()
   fetchPromos()
+  if (auth.isAdmin) fetchCategories()
   try {
     const res = await settingsApi.sysinfo()
     if (res.data.ok) sysinfo.value = res.data.info
@@ -330,6 +433,55 @@ onMounted(async () => {
     /* ignore */
   }
 })
+
+const fetchCategories = async () => {
+  try {
+    const res = await productsApi.categories()
+    if (res.data.ok) categories.value = res.data.categories
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+const openCategory = (c) => {
+  categoryForm.value = c ? { id: c.id, name: c.name } : { id: 0, name: '' }
+  showCategoryForm.value = true
+}
+
+const submitCategory = async () => {
+  if (!categoryForm.value.name.trim()) return toast('Category name is required.')
+  loading.value = true
+  try {
+    const res = await productsApi.saveCategory(categoryForm.value.name.trim(), categoryForm.value.id)
+    if (res.data.ok) {
+      showCategoryForm.value = false
+      fetchCategories()
+      toast('Category saved.', 'success')
+    } else {
+      toast(res.data.message)
+    }
+  } catch (e) {
+    toast('Could not save category.')
+  } finally {
+    loading.value = false
+  }
+}
+
+const removeCategory = async (c) => {
+  if (!(await confirmBox({ title: 'Delete category?', message: `Delete "${c.name}"? Products in it keep existing but lose their category.`, danger: true }))) return
+  loading.value = true
+  try {
+    const res = await productsApi.deleteCategory(c.id)
+    if (res.data.ok) {
+      fetchCategories()
+      toast('Category deleted.', 'success')
+    } else toast(res.data.message)
+  } catch (e) {
+    toast('Could not delete category.')
+  } finally {
+    loading.value = false
+  }
+}
 
 const fetchPromos = async () => {
   try {
@@ -350,19 +502,21 @@ const openPromo = (p) => {
 }
 
 const submitPromo = async () => {
-  if (!promoForm.value.name.trim()) return alert('Promo name is required.')
-  if (!promoForm.value.discount_percent || promoForm.value.discount_percent < 1 || promoForm.value.discount_percent > 100) return alert('Discount must be between 1 and 100%.')
+  if (!promoForm.value.name.trim()) return toast('Promo name is required.')
+  if (!promoForm.value.discount_percent || promoForm.value.discount_percent < 1 || promoForm.value.discount_percent > 100) return toast('Discount must be between 1 and 100%.')
+  if (!promoForm.value.start_time || !promoForm.value.end_time) return toast('Promo start and end times are required.')
   loading.value = true
   try {
     const res = await promosApi.save({ ...promoForm.value })
     if (res.data.ok) {
       showPromoForm.value = false
       fetchPromos()
+      toast('Promo saved.', 'success')
     } else {
-      alert(res.data.message)
+      toast(res.data.message)
     }
   } catch (e) {
-    alert('Could not save promo.')
+    toast('Could not save promo.')
   } finally {
     loading.value = false
   }
@@ -373,25 +527,34 @@ const removePromo = async (p) => {
   loading.value = true
   try {
     const res = await promosApi.remove(p.id)
-    if (res.data.ok) fetchPromos()
-    else alert(res.data.message)
+    if (res.data.ok) {
+      fetchPromos()
+      toast('Promo deleted.', 'success')
+    } else toast(res.data.message)
   } catch (e) {
-    alert('Could not delete promo.')
+    toast('Could not delete promo.')
   } finally {
     loading.value = false
   }
 }
 
 const togglePromo = async (p) => {
-  await promosApi.save({ id: p.id, name: p.name, discount_percent: p.discount_percent, start_time: p.start_time, end_time: p.end_time, is_active: p.is_active ? 0 : 1 })
-  fetchPromos()
+  try {
+    const res = await promosApi.save({ id: p.id, name: p.name, discount_percent: p.discount_percent, start_time: p.start_time, end_time: p.end_time, is_active: p.is_active ? 0 : 1 })
+    fetchPromos()
+    if (res.data.ok) toast(`Promo ${p.is_active ? 'paused' : 'activated'}.`, 'success')
+    else toast(res.data.message)
+  } catch (e) {
+    toast('Could not update promo.')
+  }
 }
 
 const saveSettings = async () => {
   loading.value = true
   try {
     const res = await store.saveSettings({ ...form })
-    if (!res.ok) alert(res.message)
+    if (!res.ok) toast(res.message)
+    else toast('Settings saved.', 'success')
   } finally {
     loading.value = false
   }
@@ -409,11 +572,12 @@ const uploadLogo = async (e) => {
     if (res.data.ok) {
       await store.fetchSettings()
       Object.assign(form, store.settings)
+      toast('Logo uploaded.', 'success')
     } else {
-      alert(res.data.message)
+      toast(res.data.message)
     }
   } catch {
-    alert('Could not upload logo.')
+    toast('Could not upload logo.')
   } finally {
     savingLogo.value = false
     if (logoInput.value) logoInput.value.value = ''
@@ -427,11 +591,31 @@ const removeLogo = async () => {
     if (res.data.ok) {
       await store.fetchSettings()
       Object.assign(form, store.settings)
+      toast('Logo removed.', 'success')
     } else {
-      alert(res.data.message)
+      toast(res.data.message)
     }
   } catch {
-    alert('Could not remove logo.')
+    toast('Could not remove logo.')
+  }
+}
+
+const sendTest = async () => {
+  if (!testEmail.value.trim()) return toast('Enter an email address first.')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail.value.trim())) return toast('Enter a valid email address.')
+  sending.value = true
+  try {
+    const res = await settingsApi.sendTestEmail(testEmail.value.trim())
+    if (res.data.ok) {
+      toast(res.data.message || 'Test email sent.', 'success')
+      testEmail.value = ''
+    } else {
+      toast(res.data.message || 'Failed to send the test email.')
+    }
+  } catch (e) {
+    toast(e.response?.data?.message || 'Could not send the test email.')
+  } finally {
+    sending.value = false
   }
 }
 
@@ -445,11 +629,15 @@ const openShift = (s) => {
 }
 
 const submitShift = async () => {
+  if (!shiftForm.value.name.trim()) return toast('Shift name is required.')
+  if (!shiftForm.value.start_time || !shiftForm.value.end_time) return toast('Shift start and end times are required.')
   loading.value = true
   try {
     const res = await store.saveShift({ ...shiftForm.value })
-    if (res.ok) showShiftForm.value = false
-    else alert(res.message)
+    if (res.ok) {
+      showShiftForm.value = false
+      toast('Shift saved.', 'success')
+    } else toast(res.message)
   } finally {
     loading.value = false
   }
@@ -458,6 +646,7 @@ const submitShift = async () => {
 const removeShift = async (s) => {
   if (!(await confirmBox({ title: 'Delete shift?', message: `Delete shift ${s.name}?`, danger: true }))) return
   const res = await store.deleteShift(s.id)
-  if (!res.ok) alert(res.message)
+  if (res.ok) toast('Shift deleted.', 'success')
+  else toast(res.message)
 }
 </script>

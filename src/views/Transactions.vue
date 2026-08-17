@@ -144,7 +144,7 @@
             </tbody>
             <tfoot v-if="filteredBilliard.length && !loading" class="sticky bottom-0 z-10">
               <tr class="bg-canvas/90 backdrop-blur">
-                <td colspan="5" class="px-4 py-3 text-xs font-bold uppercase tracking-wide text-muted">{{ filteredBilliard.value.length }} sessions</td>
+                <td colspan="5" class="px-4 py-3 text-xs font-bold uppercase tracking-wide text-muted">{{ filteredBilliard.length }} sessions</td>
                 <td class="px-4 py-3 text-right tabular-nums text-[13px] font-bold text-ink">{{ money(totalBilliardSubtotal) }}</td>
                 <td colspan="2"></td>
                 <td class="px-4 py-3 text-right tabular-nums text-[13px] font-bold text-brand-green">{{ money(totalBilliard) }}</td>
@@ -538,8 +538,8 @@ const exportBoth = () => {
 }
 
 const money = (amount) => '₱' + Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const formatDateTime = (dt) => new Date(dt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-const formatTime = (dt) => (dt ? new Date(dt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—')
+const formatDateTime = (dt) => new Date(dt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+const formatTime = (dt) => (dt ? new Date(dt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }) : '—')
 const parseDuration = (d) => {
   if (!d) return 0
   const [h, m, s] = String(d).split(':').map(Number)

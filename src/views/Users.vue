@@ -147,7 +147,12 @@
         </div>
         <div class="mb-3">
           <label class="form-label">Password {{ form.id ? '(leave blank to keep)' : '' }}</label>
-          <input v-model="form.password" type="password" class="form-input" :required="!form.id" autocomplete="new-password" />
+          <div class="relative">
+            <input v-model="form.password" :type="showPassword ? 'text' : 'password'" class="form-input w-full pr-10" :required="!form.id" autocomplete="new-password" />
+            <button type="button" class="absolute inset-y-0 right-2 my-auto flex h-8 w-8 items-center justify-center rounded-lg text-faint transition-colors hover:bg-elevated hover:text-ink" :title="showPassword ? 'Hide password' : 'Show password'" @click="showPassword = !showPassword">
+              <i :class="showPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"></i>
+            </button>
+          </div>
           <p class="mt-1 text-xs text-muted">At least 6 characters.</p>
         </div>
         <div class="flex gap-2">
@@ -163,7 +168,12 @@
       <form @submit.prevent="submitReset">
         <div class="mb-3">
           <label class="form-label">New Password</label>
-          <input v-model="resetPassword" type="password" class="form-input" required autocomplete="new-password" />
+          <div class="relative">
+            <input v-model="resetPassword" :type="showResetPassword ? 'text' : 'password'" class="form-input w-full pr-10" required autocomplete="new-password" />
+            <button type="button" class="absolute inset-y-0 right-2 my-auto flex h-8 w-8 items-center justify-center rounded-lg text-faint transition-colors hover:bg-elevated hover:text-ink" :title="showResetPassword ? 'Hide password' : 'Show password'" @click="showResetPassword = !showResetPassword">
+              <i :class="showResetPassword ? 'bi bi-eye-slash' : 'bi bi-eye'"></i>
+            </button>
+          </div>
           <p class="mt-1 text-xs text-muted">At least 6 characters.</p>
         </div>
         <div class="flex gap-2">
@@ -178,7 +188,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { Users, UserRound, ShieldCheck, BadgeCheck } from '@lucide/vue'
-import { confirmBox } from '@/utils/dialogs'
+import { confirmBox, toast } from '@/utils/dialogs'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
 import Modal from '@/components/ui/Modal.vue'
@@ -189,6 +199,8 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const showForm = ref(false)
 const showReset = ref(false)
+const showPassword = ref(false)
+const showResetPassword = ref(false)
 const resetTarget = ref(null)
 const resetPassword = ref('')
 const resetting = ref(false)
@@ -230,37 +242,50 @@ const filteredUsers = computed(() => {
 
 const openAdd = () => {
   form.value = emptyForm()
+  showPassword.value = false
   showForm.value = true
 }
 const openEdit = (u) => {
   form.value = { id: u.id, username: u.username, full_name: u.full_name, role: u.role, password: '' }
+  showPassword.value = false
   showForm.value = true
 }
 const openReset = (u) => {
   resetTarget.value = u
   resetPassword.value = ''
+  showResetPassword.value = false
   showReset.value = true
 }
 
 const submitForm = async () => {
+  if (!form.value.full_name.trim()) return toast('Full name is required.')
+  if (!form.value.username.trim()) return toast('Username is required.')
+  if (!/^[a-zA-Z0-9_]+$/.test(form.value.username.trim())) return toast('Username may only contain letters, numbers and underscores.')
+  if (!form.value.id && form.value.password.length < 8) return toast('Password must be at least 8 characters.')
   loading.value = true
   try {
     const res = await store.saveUser({ ...form.value })
-    if (res.ok) showForm.value = false
-    else alert(res.message)
+    if (res.ok) {
+      showForm.value = false
+      toast(form.value.id ? 'User updated' : 'User created', 'success')
+    } else {
+      toast(res.message)
+    }
   } finally {
     loading.value = false
   }
 }
 
 const submitReset = async () => {
+  if (resetPassword.value.length < 8) return toast('Password must be at least 8 characters.')
   resetting.value = true
   try {
     const res = await store.resetPassword(resetTarget.value.id, resetPassword.value)
     if (res.ok) {
       showReset.value = false
+      toast('Password updated', 'success')
     } else {
-      alert(res.message)
+      toast(res.message)
     }
   } finally {
     resetting.value = false
@@ -269,13 +294,21 @@ const submitReset = async () => {
 
 const toggleStatus = async (u) => {
   const res = await store.setStatus(u.id, u.is_active ? 0 : 1)
-  if (!res.ok) alert(res.message)
+  if (!res.ok) {
+    toast(res.message)
+  } else {
+    toast(`${u.full_name} ${u.is_active ? 'disabled' : 'enabled'}`, 'success')
+  }
 }
 
 const removeUser = async (u) => {
   if (!(await confirmBox({ title: 'Delete user?', message: `Delete user ${u.full_name} (@${u.username})? This cannot be undone.`, danger: true }))) return
   const res = await store.deleteUser(u.id)
-  if (!res.ok) alert(res.message)
+  if (!res.ok) {
+    toast(res.message)
+  } else {
+    toast('User deleted', 'success')
+  }
 }
 
 const canEdit = (u) => u.role !== 'superadmin' || authStore.isSuperadmin

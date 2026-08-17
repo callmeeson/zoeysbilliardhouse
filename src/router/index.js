@@ -94,21 +94,21 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
+  if (to.meta.guest) {
+    if (authStore.isAuthenticated) {
+      next(authStore.user?.role === 'staff' ? '/sessions' : '/')
+    } else {
+      next()
+    }
+    return
+  }
+
   if (!authStore.isAuthenticated) {
     await authStore.initAuth()
   }
 
   const isAuthenticated = authStore.isAuthenticated
   const userRole = authStore.user?.role
-
-  if (to.meta.guest) {
-    if (isAuthenticated) {
-      next(userRole === 'staff' ? '/sessions' : '/')
-    } else {
-      next()
-    }
-    return
-  }
 
   if (!isAuthenticated) {
     next('/login')

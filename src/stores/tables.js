@@ -96,14 +96,6 @@ export const useTablesStore = defineStore('tables', () => {
     return response.data
   }
 
-  async function awardPoints(sessionId) {
-    const response = await tablesApi.awardPoints(sessionId)
-    if (response.data.ok) {
-      await fetchTables()
-    }
-    return response.data
-  }
-
   const availableTables = computed(() =>
     tables.value.filter((t) => t.status === 'available')
   )

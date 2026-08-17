@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../config.php';
-require_login();
+// Reports expose gross revenue, cost and profit — admin/superadmin only.
+// No POS flow calls this file, so require_admin() is safe to gate everything.
+require_admin();
 
 $action = $_REQUEST['action'] ?? '';
 $from = $_GET['from'] ?? date('Y-m-01');
@@ -86,16 +88,21 @@ switch ($action) {
             LEFT JOIN products p ON p.id = si.product_id
             WHERE $prevFilter", $prevParams);
 
-        // last 12 months trend (respects cashier/shift filters)
-        $trendFrom = date('Y-m-01', strtotime('-11 months'));
+        // last 12 months trend (respects cashier/shift filters).
+        // Anchored to the first of the month so day-of-month drift (e.g. a
+        // month-end date like Aug 31 rolling to Sep 30) can never shift or
+        // drop a month from the chart.
+        $trendAnchor = date('Y-m-01');
+        $trendFrom = date('Y-m-01', strtotime($trendAnchor . ' -11 months'));
         [$trendFilter, $trendParams] = period_filter($trendFrom, date('Y-m-d'), $cashier, $shiftId);
         $monthly = db_all("
             SELECT DATE_FORMAT(created_at, '%Y-%m') AS m, COALESCE(SUM(total),0) AS total, COUNT(*) AS cnt
             FROM sales s WHERE $trendFilter GROUP BY DATE_FORMAT(created_at, '%Y-%m') ORDER BY m
         ", $trendParams);
         $months = [];
-        for ($i = 11; $i >= 0; $i--) {
-            $months[date('Y-m', strtotime("-{$i} months"))] = ['m' => date('Y-m', strtotime("-{$i} months")), 'total' => 0, 'cnt' => 0];
+        for ($i = 0; $i < 12; $i++) {
+            $key = date('Y-m', strtotime($trendFrom . " +{$i} months"));
+            $months[$key] = ['m' => $key, 'total' => 0, 'cnt' => 0];
         }
         foreach ($monthly as $r) {
             if (isset($months[$r['m']])) { $months[$r['m']] = $r; }
@@ -216,6 +223,12 @@ switch ($action) {
         elseif ($type === 'pos') $typeFilter = " AND (s.billiard_amount IS NULL OR s.billiard_amount = 0)";
         $txnFilter = $filter . $typeFilter;
         $txnParams = $params;
+        // Server-side pagination so the response stays bounded as the
+        // dataset grows (frontend passes page/page_size; default 500, cap 1000).
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $pageSize = min(1000, max(1, (int)($_GET['page_size'] ?? 500)));
+        $offset = ($page - 1) * $pageSize;
+        $total = (int)db_value("SELECT COUNT(*) FROM sales s WHERE $txnFilter", $txnParams);
         $rows = db_all("
             SELECT s.id, s.reference, s.total, s.discount, s.subtotal, s.payment_method,
                    s.billiard_hours, s.billiard_amount, s.status, s.created_at,
@@ -234,16 +247,28 @@ switch ($action) {
             LEFT JOIN reservations rs ON rs.session_id = bs.id
             WHERE $txnFilter
             ORDER BY s.id DESC
-        ", $txnParams);
-        foreach ($rows as &$r) {
-            $items = db_all("
-                SELECT si.product_name, si.qty, si.selling_price, si.total,
+            LIMIT ? OFFSET ?
+        ", array_merge($txnParams, [$pageSize, $offset]));
+        // Fetch all line items for the page in one query (was N+1 per row).
+        $itemsBySale = [];
+        if ($rows) {
+            $ids = array_column($rows, 'id');
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            foreach (db_all("
+                SELECT si.sale_id, si.product_name, si.qty, si.selling_price, si.total,
                        COALESCE(p.buying_price, 0) AS unit_cost
                 FROM sale_items si
                 LEFT JOIN products p ON p.id = si.product_id
-                WHERE si.sale_id = ?
-                ORDER BY si.id ASC
-            ", [$r['id']]);
+                WHERE si.sale_id IN ($in)
+                ORDER BY si.sale_id, si.id ASC
+            ", $ids) as $item) {
+                $saleId = (int)$item['sale_id'];
+                unset($item['sale_id']);
+                $itemsBySale[$saleId][] = $item;
+            }
+        }
+        foreach ($rows as &$r) {
+            $items = $itemsBySale[(int)$r['id']] ?? [];
             foreach ($items as &$i) {
                 $i['profit'] = round((float)$i['total'] - (float)$i['qty'] * (float)$i['unit_cost'], 2);
             }
@@ -255,16 +280,14 @@ switch ($action) {
                 $secs = max(0, (int)strtotime($r['end_time']) - (int)strtotime($r['start_time']));
                 $r['duration'] = sprintf('%d:%02d:%02d', (int)floor($secs / 3600), (int)floor(($secs % 3600) / 60), $secs % 60);
             }
-            // Billiard rows: rebuild Subtotal / Discount from the session itself so
-            // legacy rows (stored with net subtotal) also display the gross correctly.
+            // Billiard rows: the stored subtotal/discount were recorded at
+            // billing time. The old code rebuilt them from the table's
+            // CURRENT rate, which rewrote history whenever the rate changed.
+            // Only the discount breakdown label is derived.
             if (!empty($r['billiard_amount'])) {
-                $sessHours = (float)($r['session_hours'] ?: $r['billiard_hours']);
-                $rate = (float)($r['rate_per_hour'] ?? 0);
                 $freeUsed = (int)($r['free_hour_used'] ?? 0);
-                $loyalty = $freeUsed ? round($rate, 2) : 0.0;
-                $promo = max(0.0, round((float)($r['discount'] ?? 0) - $loyalty, 2));
-                $r['subtotal'] = round($sessHours * $rate, 2);        // gross: full time at rate
-                $r['discount'] = round($loyalty + $promo, 2);          // loyalty free hour + promo
+                $loyalty = $freeUsed ? round(min((float)$r['discount'], (float)$r['rate_per_hour']), 2) : 0.0;
+                $promo = max(0.0, round((float)$r['discount'] - $loyalty, 2));
                 if ($loyalty > 0 && $promo > 0) $r['discount_type'] = 'Loyalty + Promo';
                 elseif ($loyalty > 0) $r['discount_type'] = 'Loyalty';
                 elseif ($promo > 0) $r['discount_type'] = 'Promo';
@@ -274,7 +297,7 @@ switch ($action) {
             }
         }
         unset($r);
-        json_response(200, ['ok' => true, 'transactions' => $rows]);
+        json_response(200, ['ok' => true, 'transactions' => $rows, 'total' => $total, 'page' => $page, 'page_size' => $pageSize]);
     }
     break;
 

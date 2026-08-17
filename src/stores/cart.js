@@ -102,7 +102,7 @@ export const useCartStore = defineStore('cart', () => {
       }
       return response.data
     } catch (e) {
-      return { ok: false, message: e.message }
+      return { ok: false, message: e.response?.data?.message || e.message || 'Checkout failed' }
     } finally {
       loading.value = false
     }

@@ -48,8 +48,6 @@ export const tablesApi = {
 }
 
 export const posApi = {
-  products: (params) => api.get('pos.php', { params: { action: 'products', ...params } }),
-  categories: () => api.get('pos.php', { params: { action: 'categories' } }),
   checkout: (data) => api.post('pos.php', data, { params: { action: 'checkout' } }),
 }
 
@@ -65,7 +63,10 @@ export const productsApi = {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   }),
   categories: () => api.get('products.php', { params: { action: 'categories' } }),
-  saveCategory: (name) => api.post('products.php', new URLSearchParams({ action: 'save_category', name }), {
+  saveCategory: (name, id = 0) => api.post('products.php', new URLSearchParams({ action: 'save_category', name, id }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
+  deleteCategory: (id) => api.post('products.php', new URLSearchParams({ action: 'delete_category', id }), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   }),
   suppliers: () => api.get('products.php', { params: { action: 'suppliers' } }),
@@ -149,6 +150,9 @@ export const settingsApi = {
   }),
   backup: () => api.get('settings.php', { params: { action: 'backup' }, responseType: 'blob' }),
   sysinfo: () => api.get('settings.php', { params: { action: 'sysinfo' } }),
+  sendTestEmail: (to) => api.post('settings.php', new URLSearchParams({ action: 'send_test_email', to }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
 }
 
 export const promosApi = {

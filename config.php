@@ -13,7 +13,15 @@ function env_or(string $key, string $default): string
 $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     || ($_SERVER['SERVER_PORT'] ?? '') === '443'
     || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+// The base URL is built from the request host. In production, whitelist the
+// allowed hosts via ZB_ALLOWED_HOSTS (comma-separated) so a poisoned
+// Host/forwarded header can never be turned into a phishing link (open
+// redirect via the generated BASE_URL).
+$allowedHosts = array_values(array_filter(array_map('trim', explode(',', env_or('ZB_ALLOWED_HOSTS', '')))));
 $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+if ($allowedHosts && !in_array($host, $allowedHosts, true)) {
+    $host = $allowedHosts[0];
+}
 $baseDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
 
 // ---- Hardened session cookie ----
