@@ -4,7 +4,7 @@
 -- =====================================================
 
 ALTER TABLE tables
-    MODIFY type ENUM('regular','vip','ktv','kubo') NOT NULL DEFAULT 'regular';
+    MODIFY type ENUM('regular','vip','kubo') NOT NULL DEFAULT 'regular';
 
 ALTER TABLE billiard_sessions
     ADD COLUMN customer_name VARCHAR(100) NULL AFTER table_id,

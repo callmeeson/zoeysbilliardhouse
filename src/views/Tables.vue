@@ -152,6 +152,14 @@
         </div>
       </div>
 
+      <div v-if="startTable.type === 'vip'" class="mb-3 rounded-xl border border-brand-gold-strong/40 bg-brand-gold/5 p-3">
+        <label class="label">Karaoke</label>
+        <div class="flex gap-2">
+          <button type="button" class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold" :class="startForm.karaoke ? 'bg-brand-gold-strong text-white' : 'bg-elevated text-ink'" @click="startForm.karaoke = true">With Karaoke</button>
+          <button type="button" class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold" :class="!startForm.karaoke ? 'bg-brand-gold-strong text-white' : 'bg-elevated text-ink'" @click="startForm.karaoke = false">Without Karaoke</button>
+        </div>
+      </div>
+
       <!-- Loyalty / free hour -->
       <div v-if="startForm.selectedCustomer" class="mb-2 rounded-xl border p-3" :class="canClaimFree && startForm.freeHour ? 'border-brand-gold-strong/40 bg-brand-gold/5' : 'border-line'">
         <div class="flex items-center justify-between gap-2">
@@ -418,8 +426,7 @@
           <select v-model="editForm.type" class="form-select" required>
             <option value="regular">Regular</option>
             <option value="vip">VIP</option>
-            <option value="ktv">KTV Room</option>
-            <option value="kubo">Kubo</option>
+            <option value="kubo">Kubo Rental</option>
           </select>
         </div>
         <div>
@@ -443,7 +450,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { confirmBox, toast } from '@/utils/dialogs'
 import {
-  Play, Star, Music4, Home, Plus, RefreshCw, SlidersHorizontal, Loader2, AlertTriangle, Table2,
+  Play, Star, Home, Plus, RefreshCw, SlidersHorizontal, Loader2, AlertTriangle, Table2,
   Search, Users, Percent, Stamp,
 } from '@lucide/vue'
 import { useAuthStore } from '@/stores/auth'
@@ -492,14 +499,12 @@ const typeFilters = [
   { value: 'all', label: 'All' },
   { value: 'regular', label: 'Regular' },
   { value: 'vip', label: 'VIP' },
-  { value: 'ktv', label: 'KTV' },
   { value: 'kubo', label: 'Kubo' },
 ]
 
 const quickActions = [
   { type: 'regular', label: 'Start REG', icon: Play, class: 'qa-blue' },
   { type: 'vip', label: 'Start VIP', icon: Star, class: 'qa-gold' },
-  { type: 'ktv', label: 'Start KTV', icon: Music4, class: 'qa-purple' },
   { type: 'kubo', label: 'Rent Kubo', icon: Home, class: 'qa-green' },
 ]
 
@@ -577,7 +582,7 @@ onMounted(async () => {
 onUnmounted(() => clearInterval(ticker))
 
 function emptyStartForm() {
-  return { isWalkIn: true, walkin_name: '', hours: 1, promo: false, freeHour: false, payment: 0 }
+  return { isWalkIn: true, walkin_name: '', hours: 1, promo: false, freeHour: false, karaoke: false, payment: 0 }
 }
 
 function openSelectTable(type) {
@@ -590,7 +595,7 @@ function openSelectTable(type) {
 function selectTableForStart(t) {
   if (t.status === 'occupied') return
   showSelectTable.value = false
-  startTable.value = { id: t.id, number: t.table_number, rate: parseFloat(t.rate_per_hour) }
+  startTable.value = { id: t.id, number: t.table_number, type: t.type, rate: parseFloat(t.rate_per_hour) }
   startForm.value = emptyStartForm()
   customerQuery.value = ''
   customerResults.value = []
@@ -630,6 +635,7 @@ async function confirmStart() {
       hours: startForm.value.hours,
       promo: startForm.value.promo && promoActive.value ? 1 : 0,
       free_hour: canClaimFree.value && startForm.value.freeHour ? 1 : 0,
+      karaoke: startTable.value.type === 'vip' && startForm.value.karaoke ? 1 : 0,
       payment: startForm.value.payment.toFixed(2),
     }
     const res = await store.startSession(body)
@@ -818,7 +824,6 @@ const typeMeta = (type) => {
   const map = {
     regular: { label: 'Regular' },
     vip: { label: 'VIP' },
-    ktv: { label: 'KTV' },
     kubo: { label: 'Kubo' },
   }
   return map[type] || map.regular

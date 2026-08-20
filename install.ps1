@@ -1,13 +1,17 @@
 <#
-    Zoeys Billiard House - one-tap installer (Windows + XAMPP)
+    Zoeys Billiard House - one-tap installer (Windows, Laragon or XAMPP)
 
     Checks prerequisites, creates/imports the database (never overwrites
     existing data), builds the frontend and opens the app.
 
+    The MySQL client is auto-detected: Laragon (C:\laragon\bin\mysql\*\bin),
+    then XAMPP (C:\xampp\mysql\bin), then whatever is on PATH.
+
     Usage:        powershell -File install.ps1
     Options:      -DbUser root        MySQL user (default: root / ZB_DB_USER)
                   -DbPass ""          MySQL password (default: empty / ZB_DB_PASS)
-                  -XamppRoot C:\xampp (default)
+                  -MysqlCli <path>    explicit path to mysql.exe (skips detection)
+                  -ServerRoot <path>  stack root, e.g. C:\laragon or C:\xampp
                   -ForceRebuild       run npm install + npm run build even when fresh
                   -Reinstall          DESTRUCTIVE: drop DB and re-import seeds (asks first)
                   -NoBrowser          do not open the browser at the end
@@ -15,19 +19,39 @@
 param(
     [string]$DbUser = $env:ZB_DB_USER,
     [string]$DbPass = $env:ZB_DB_PASS,
-    [string]$XamppRoot = 'C:\xampp',
+    [string]$MysqlCli,
+    [string]$ServerRoot,
+    [Alias('XamppRoot')][string]$LegacyXamppRoot,
     [switch]$ForceRebuild,
     [switch]$Reinstall,
     [switch]$NoBrowser
 )
 $ErrorActionPreference = 'Stop'
 if (-not $DbUser) { $DbUser = 'root' }
+if (-not $ServerRoot -and $LegacyXamppRoot) { $ServerRoot = $LegacyXamppRoot }
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FolderName  = Split-Path -Leaf $ProjectRoot
-$MysqlCli    = Join-Path $XamppRoot 'mysql\bin\mysql.exe'
 $InstallSql  = Join-Path $ProjectRoot 'database\install.sql'
 $BaseUrl     = "http://localhost/$FolderName/"
+
+# Resolve mysql.exe: explicit -MysqlCli > -ServerRoot > Laragon > XAMPP > PATH.
+function Resolve-MysqlCli([string]$explicit, [string]$root) {
+    if ($explicit) { return $explicit }
+    $globs = @()
+    if ($root) { $globs += @((Join-Path $root 'bin\mysql\*\bin\mysql.exe'), (Join-Path $root 'mysql\bin\mysql.exe')) }
+    $globs += @('C:\laragon\bin\mysql\*\bin\mysql.exe', 'C:\xampp\mysql\bin\mysql.exe')
+    foreach ($g in $globs) {
+        $hit = Get-ChildItem -Path $g -ErrorAction SilentlyContinue |
+               Sort-Object FullName -Descending | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    $cmd = Get-Command mysql -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+$MysqlCli = Resolve-MysqlCli $MysqlCli $ServerRoot
+
 
 function Step([string]$msg)  { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Ok([string]$msg)    { Write-Host "  [OK] $msg" -ForegroundColor Green }
@@ -47,18 +71,19 @@ Write-Host " App URL : $BaseUrl"
 # ---- 1. Prerequisites -----------------------------------------------------
 Step "Checking prerequisites"
 
-if (-not (Test-Path -LiteralPath $MysqlCli)) {
-    if (Get-Command mysql -ErrorAction SilentlyContinue) { $MysqlCli = (Get-Command mysql).Source }
-    else { Fail "MySQL client not found in '$MysqlCli'. Start XAMPP (or pass -XamppRoot <path>)." }
+if (-not $MysqlCli -or -not (Test-Path -LiteralPath $MysqlCli)) {
+    Fail "MySQL client (mysql.exe) not found. Looked in Laragon (C:\laragon\bin\mysql\*\bin), XAMPP (C:\xampp\mysql\bin) and PATH. Pass -MysqlCli <path to mysql.exe> or -ServerRoot <C:\laragon|C:\xampp>."
 }
 Ok "MySQL client: $MysqlCli"
+
 
 $mysql = @()
 try { $mysql = & $MysqlCli @mysqlArgs -N -e 'SELECT 1' 2>$null }
 catch { $mysql = @() }
 if ($LASTEXITCODE -ne 0 -or $mysql.Count -eq 0) {
-    Fail "Cannot reach MySQL as user '$DbUser'. Is MySQL running in the XAMPP Control Panel? Does the user/password exist? (retry with -DbUser/-DbPass)"
+    Fail "Cannot reach MySQL as user '$DbUser'. Is MySQL started? (Laragon: Menu > MySQL > Start, or 'Start All'; XAMPP: Control Panel). Does the user/password exist? (retry with -DbUser/-DbPass)"
 }
+
 Ok "MySQL server reachable"
 
 $hasNode = [bool](Get-Command node -ErrorAction SilentlyContinue)
@@ -130,7 +155,8 @@ try {
 if ($appOk) {
     Ok "App responds at $BaseUrl"
 } else {
-    Warn "App not responding at $BaseUrl yet. If this is the first run, start Apache in the XAMPP Control Panel and retry."
+    Warn "App not responding at $BaseUrl yet. If this is the first run, start Apache (Laragon: Menu > Apache > Start / 'Start All'; XAMPP: Control Panel) and retry."
+
 }
 
 try {

@@ -13,7 +13,7 @@
       </div>
       <div class="flex items-center gap-2">
         <button class="btn btn-outline" @click="load"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
-        <button class="btn btn-primary" @click="exportCsv"><i class="bi bi-download"></i> Export CSV</button>
+        <button class="btn btn-primary" @click="exportExcelLogs"><i class="bi bi-download"></i> Export Excel</button>
       </div>
     </div>
 
@@ -112,6 +112,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAuditStore } from '@/stores/audit'
 import { auditApi } from '@/api/services'
+import { exportExcel, formatExcelDateTime } from '@/utils/export'
 
 const store = useAuditStore()
 
@@ -183,6 +184,11 @@ const ACTION_META = {
   user_delete: { label: 'User Deleted', icon: 'bi bi-person-x', color: 'badge-danger' },
   user_password: { label: 'Password Reset', icon: 'bi bi-key', color: 'badge-warning' },
   sale_void: { label: 'Sale Voided', icon: 'bi bi-x-circle', color: 'badge-danger' },
+  sale_edit: { label: 'Sale Edited', icon: 'bi bi-pencil-square', color: 'badge-warning' },
+  sale_delete: { label: 'Sale Deleted', icon: 'bi bi-trash', color: 'badge-danger' },
+  session_add: { label: 'Missing Session Added', icon: 'bi bi-plus-square', color: 'badge-info' },
+  sale_add: { label: 'Missing Sale Added', icon: 'bi bi-plus-square', color: 'badge-info' },
+  session_extend: { label: 'Closed Session Extended', icon: 'bi bi-hourglass-split', color: 'badge-warning' },
   settings_save: { label: 'Settings Updated', icon: 'bi bi-gear', color: 'badge-secondary' },
   settings_logo: { label: 'Logo Updated', icon: 'bi bi-image', color: 'badge-secondary' },
   shift_save: { label: 'Shift Saved', icon: 'bi bi-clock', color: 'badge-info' },
@@ -201,27 +207,17 @@ const actionMeta = (action) => {
   return { label, icon: 'bi bi-dot', color: 'badge-secondary' }
 }
 
-/* --- csv export --- */
+/* --- excel export --- */
 
-const escCsv = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"'
-const downloadCsv = (csv, name) => {
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
-}
-const exportCsv = async () => {
+const exportExcelLogs = async () => {
   const all = []
   for (let p = 1; ; p++) {
     const res = await auditApi.list({ ...store.filters, page: p, page_size: 500 })
     all.push(...res.data.logs)
     if (all.length >= res.data.total || res.data.logs.length === 0) break
   }
-  const csv = ['Date,User,Role,Action,Details', ...all.map((l) => [l.created_at, l.username, l.role, l.action, l.detail].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `audit-log-${store.filters.from}-to-${store.filters.to}.csv`)
+  const rows = all.map((l) => [formatExcelDateTime(l.created_at), l.username, l.role, l.action, l.detail])
+  exportExcel(`audit-log-${store.filters.from}-to-${store.filters.to}.xlsx`, 'Audit Log', ['Date', 'User', 'Role', 'Action', 'Details'], rows)
 }
 
 /* --- helpers --- */

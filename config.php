@@ -77,3 +77,13 @@ function db(): PDO
 
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
+
+// Self-triggering "lazy cron" for the automatic daily transaction email
+// report. The check itself is cheap; the build+send runs at most once a day
+// (guarded by an atomic claim inside maybe_send_daily_report). Only fires on
+// GET requests so critical POST flows (checkout, save) are never delayed.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+    ignore_user_abort(true);
+    set_time_limit(90);
+    maybe_send_daily_report();
+}

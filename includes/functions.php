@@ -249,8 +249,11 @@ function shop_open_period_start(int $ts): int
  * Sends an email through the Resend API using the settings configured in
  * Settings → Email (API key + sender address). Returns
  * ['ok' => true, 'message' => ...] on success, ['ok' => false] otherwise.
+ *
+ * Optional $attachments: array of ['filename' => ..., 'content' => base64,
+ * 'type' => mime] sent as Resend attachments.
  */
-function send_resend_email(string $to, string $subject, string $html): array
+function send_resend_email(string $to, string $subject, string $html, array $attachments = []): array
 {
     $apiKey = get_setting('resend_api_key', '');
     $from   = get_setting('resend_from_email', '');
@@ -259,12 +262,16 @@ function send_resend_email(string $to, string $subject, string $html): array
     if (!filter_var($to, FILTER_VALIDATE_EMAIL)) return ['ok' => false, 'message' => 'Invalid recipient email address.'];
 
     $name = get_setting('business_name', '');
-    $json = json_encode([
+    $payload = [
         'from'    => $name !== '' ? "$name <$from>" : $from,
         'to'      => [$to],
         'subject' => $subject,
         'html'    => $html,
-    ]);
+    ];
+    if ($attachments) {
+        $payload['attachments'] = array_values($attachments);
+    }
+    $json = json_encode($payload);
 
     $ch = curl_init('https://api.resend.com/emails');
     curl_setopt_array($ch, [
@@ -301,4 +308,278 @@ function initials(string $name): string
         if ($p !== '') $out .= strtoupper(mb_substr($p, 0, 1));
     }
     return $out !== '' ? $out : '?';
+}
+
+/**
+ * Formats a datetime as 12-hour text, e.g. "2026-08-18 02:30:45 PM".
+ */
+function format_12h(?string $dt): string
+{
+    if ($dt === null || $dt === '') return '';
+    $ts = strtotime($dt);
+    if ($ts === false) return '';
+    return date('Y-m-d h:i:s A', $ts);
+}
+
+/**
+ * Builds the transaction report rows for a date range. Mirrors the frontend
+ * Transactions export: billiard sessions and POS sale items, each timestamp
+ * rendered in 12-hour format. Returns a list of sheets, each
+ * ['name' => ..., 'headers' => [...], 'rows' => [[...], ...]].
+ */
+function transactions_for_report(string $from, string $to, string $type): array
+{
+    $type = in_array($type, ['billiard', 'pos', 'all'], true) ? $type : 'all';
+    $filter = "s.status = 'completed' AND DATE(s.created_at) BETWEEN ? AND ?";
+    $params = [$from, $to];
+    $sheets = [];
+
+    if ($type === 'all' || $type === 'billiard') {
+        $rows = db_all("
+            SELECT s.reference, s.total, s.discount, s.subtotal, s.billiard_amount, s.created_at,
+                   COALESCE(u.full_name, '—') AS cashier,
+                   COALESCE(t.table_number, '') AS table_number,
+                   COALESCE(t.rate_per_hour, 0) AS rate_per_hour,
+                   COALESCE(bs.customer_name, '') AS customer_name,
+                   bs.start_time, bs.end_time,
+                   COALESCE(bs.free_hour_used, 0) AS free_hour_used,
+                   COALESCE(rs.downpayment, 0) AS downpayment
+            FROM sales s
+            LEFT JOIN users u ON u.id = s.user_id
+            LEFT JOIN billiard_sessions bs ON bs.id = s.billiard_session_id
+            LEFT JOIN tables t ON t.id = bs.table_id
+            LEFT JOIN reservations rs ON rs.session_id = bs.id
+            WHERE $filter AND s.billiard_amount > 0
+            ORDER BY s.id DESC
+        ", $params);
+
+        $data = [];
+        foreach ($rows as $r) {
+            $start = $r['start_time'] ?: '';
+            $end = $r['end_time'] ?: '';
+            $range = ($start !== '' && $end !== '')
+                ? date('h:i A', strtotime($start)) . ' - ' . date('h:i A', strtotime($end))
+                : '';
+            $duration = '';
+            if ($start !== '' && $end !== '') {
+                $secs = max(0, (int)strtotime($end) - (int)strtotime($start));
+                $duration = sprintf('%d:%02d:%02d', (int)floor($secs / 3600), (int)floor(($secs % 3600) / 60), $secs % 60);
+            }
+            // Discount breakdown label (loyalty vs promo), mirroring reports.php.
+            $freeUsed = (int)$r['free_hour_used'];
+            $loyalty = $freeUsed ? round(min((float)$r['discount'], (float)$r['rate_per_hour']), 2) : 0.0;
+            $promo = max(0.0, round((float)$r['discount'] - $loyalty, 2));
+            if ($loyalty > 0 && $promo > 0) $discountType = 'Loyalty + Promo';
+            elseif ($loyalty > 0) $discountType = 'Loyalty';
+            elseif ($promo > 0) $discountType = 'Promo';
+            else $discountType = 'N/A';
+
+            $data[] = [
+                $r['reference'],
+                ($r['table_number'] === '' || $r['table_number'] === '-') ? '' : $r['table_number'],
+                $r['customer_name'],
+                $range,
+                $duration,
+                $r['subtotal'],
+                $discountType,
+                (float)$r['downpayment'] > 0 ? $r['downpayment'] : '',
+                $r['total'],
+                format_12h($r['created_at']),
+                $r['cashier'],
+            ];
+        }
+        $sheets[] = [
+            'name'    => 'Billiard',
+            'headers' => ['Transaction ID', 'Table', 'Customer', 'Time Range', 'Duration', 'Subtotal', 'Discount', 'Downpayment', 'Grand Total', 'Transaction Date', 'Cashier'],
+            'rows'    => $data,
+        ];
+    }
+
+    if ($type === 'all' || $type === 'pos') {
+        $items = db_all("
+            SELECT s.reference, si.product_name, si.qty, si.selling_price, si.total,
+                   COALESCE(p.buying_price, 0) AS unit_cost, s.created_at,
+                   COALESCE(u.full_name, '—') AS cashier
+            FROM sale_items si
+            JOIN sales s ON s.id = si.sale_id
+            LEFT JOIN products p ON p.id = si.product_id
+            LEFT JOIN users u ON u.id = s.user_id
+            WHERE $filter AND (s.billiard_amount IS NULL OR s.billiard_amount = 0)
+            ORDER BY s.id DESC, si.id ASC
+        ", $params);
+
+        $data = [];
+        foreach ($items as $i) {
+            $data[] = [
+                $i['reference'],
+                $i['product_name'],
+                $i['qty'],
+                $i['selling_price'],
+                $i['unit_cost'],
+                $i['total'],
+                round((float)$i['total'] - (float)$i['qty'] * (float)$i['unit_cost'], 2),
+                format_12h($i['created_at']),
+                $i['cashier'],
+            ];
+        }
+        $sheets[] = [
+            'name'    => 'POS',
+            'headers' => ['Trans ID', 'Product Name', 'Qty', 'Selling Price', 'Buying Price', 'Subtotal', 'Line Profit', 'Transaction Date', 'Cashier'],
+            'rows'    => $data,
+        ];
+    }
+
+    return $sheets;
+}
+
+/**
+ * Writes a minimal, dependency-free .xlsx workbook via ZipArchive.
+ * $sheets: ['name' => sheet name, 'headers' => [...], 'rows' => [[...], ...]].
+ * Numeric-looking values become real numbers; everything else is a string.
+ */
+function write_xlsx(string $path, array $sheets): void
+{
+    $zip = new ZipArchive();
+    $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+
+    $count = count($sheets);
+    $esc = static fn(string $v): string => htmlspecialchars($v, ENT_XML1, 'UTF-8');
+
+    $contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        . '<Default Extension="xml" ContentType="application/xml"/>'
+        . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
+    for ($i = 1; $i <= $count; $i++) {
+        $contentTypes .= '<Override PartName="/xl/worksheets/sheet' . $i . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    }
+    $contentTypes .= '</Types>';
+    $zip->addFromString('[Content_Types].xml', $contentTypes);
+
+    $zip->addFromString('_rels/.rels',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        . '</Relationships>');
+
+    $sheetsXml = '';
+    for ($i = 0; $i < $count; $i++) {
+        $sheetsXml .= '<sheet name="' . $esc($sheets[$i]['name']) . '" sheetId="' . ($i + 1) . '" r:id="rId' . ($i + 1) . '"/>';
+    }
+    $zip->addFromString('xl/workbook.xml',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        . '<sheets>' . $sheetsXml . '</sheets></workbook>');
+
+    $rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+    for ($i = 1; $i <= $count; $i++) {
+        $rels .= '<Relationship Id="rId' . $i . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . $i . '.xml"/>';
+    }
+    $rels .= '<Relationship Id="rId' . ($count + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        . '</Relationships>';
+    $zip->addFromString('xl/_rels/workbook.xml.rels', $rels);
+
+    $zip->addFromString('xl/styles.xml',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        . '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+        . '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+        . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        . '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+        . '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        . '</styleSheet>');
+
+    for ($i = 0; $i < $count; $i++) {
+        $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+        foreach (array_merge([$sheets[$i]['headers']], $sheets[$i]['rows']) as $row) {
+            $sheetXml .= '<row>';
+            foreach ($row as $v) {
+                if ($v === null || $v === '') {
+                    $sheetXml .= '<c/>';
+                } elseif (is_numeric($v) && !preg_match('/^0\d/', (string)$v)) {
+                    $sheetXml .= '<c><v>' . $esc((string)$v) . '</v></c>';
+                } else {
+                    $sheetXml .= '<c t="inlineStr"><is><t xml:space="preserve">' . $esc((string)$v) . '</t></is></c>';
+                }
+            }
+            $sheetXml .= '</row>';
+        }
+        $sheetXml .= '</sheetData></worksheet>';
+        $zip->addFromString('xl/worksheets/sheet' . ($i + 1) . '.xml', $sheetXml);
+    }
+
+    $zip->close();
+}
+
+/**
+ * Builds and emails the daily transaction report for the given date range.
+ * Returns ['ok' => bool, 'message' => ...].
+ */
+function send_daily_transaction_report(string $to, string $from, string $toDate, string $type): array
+{
+    $name = get_setting('business_name', '');
+    $sheets = transactions_for_report($from, $toDate, $type);
+
+    $tmp = sys_get_temp_dir() . '/txn_report_' . bin2hex(random_bytes(6)) . '.xlsx';
+    write_xlsx($tmp, $sheets);
+    $content = base64_encode((string)file_get_contents($tmp));
+    @unlink($tmp);
+
+    $typeLabel = ['billiard' => 'Billiard', 'pos' => 'POS', 'all' => 'All'][$type] ?? 'All';
+    $subject = ($name !== '' ? $name . ' — ' : '') . 'Transaction Report ' . $from . ' (' . $typeLabel . ')';
+    $html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">'
+        . '<h2 style="color:#166534;margin-bottom:8px">' . htmlspecialchars($name !== '' ? $name : 'Zoeys Billiard House') . '</h2>'
+        . '<p>Here is the transaction report for <strong>' . htmlspecialchars($from) . '</strong>.</p>'
+        . '<p style="color:#555">The Excel file with all ' . htmlspecialchars(strtolower($typeLabel)) . ' transactions is attached.</p>'
+        . '<p style="color:#888;font-size:12px">Sent ' . date('Y-m-d h:i A') . '</p>'
+        . '</div>';
+
+    return send_resend_email($to, $subject, $html, [
+        [
+            'filename' => 'transactions-' . $from . '.xlsx',
+            'content'  => $content,
+            'type'     => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ],
+    ]);
+}
+
+/**
+ * Self-triggering "lazy cron": called on requests to check whether the daily
+ * transaction report is due. Cheap when nothing is scheduled; the expensive
+ * build+send happens at most once per day thanks to an atomic claim on the
+ * email_report_last_sent setting (a concurrent request loses the claim).
+ */
+function maybe_send_daily_report(): void
+{
+    if (get_setting('email_report_enabled', '0') !== '1') return;
+    $to = get_setting('email_report_recipient', '');
+    if (!filter_var($to, FILTER_VALIDATE_EMAIL)) return;
+
+    $time = get_setting('email_report_time', '08:00');
+    if (!preg_match('/^\d{2}:\d{2}$/', $time)) $time = '08:00';
+    $today = date('Y-m-d');
+    if (time() < strtotime($today . ' ' . $time)) return; // not due yet
+
+    $db = db();
+    // Ensure the key exists so the conditional UPDATE below can claim it.
+    $db->prepare("INSERT IGNORE INTO settings (skey, svalue) VALUES ('email_report_last_sent', '')")->execute();
+    $nowStr = date('Y-m-d H:i:s');
+    $claim = $db->prepare("UPDATE settings SET svalue = ? WHERE skey = 'email_report_last_sent' AND (svalue = '' OR svalue < ?)");
+    $claim->execute([$nowStr, $today . ' 00:00:00']);
+    if ($claim->rowCount() === 0) return; // already sent today or another request won the claim
+
+    $yesterday = date('Y-m-d', strtotime('yesterday'));
+    $res = send_daily_transaction_report($to, $yesterday, $yesterday, get_setting('email_report_type', 'all'));
+
+    if ($res['ok']) {
+        audit_log('email_report', "Daily transaction report sent to {$to} — " . $res['message']);
+    } else {
+        // Roll the claim back so the next page load retries the send.
+        $db->prepare("UPDATE settings SET svalue = '' WHERE skey = 'email_report_last_sent' AND svalue = ?")->execute([$nowStr]);
+        audit_log('email_report', "Daily transaction report to {$to} FAILED — " . $res['message']);
+    }
 }

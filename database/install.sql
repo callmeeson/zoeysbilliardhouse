@@ -65,7 +65,7 @@ CREATE TABLE products (
 CREATE TABLE tables (
     id INT AUTO_INCREMENT PRIMARY KEY,
     table_number VARCHAR(20) NOT NULL UNIQUE,
-    type ENUM('regular','vip','ktv','kubo') NOT NULL DEFAULT 'regular',
+    type ENUM('regular','vip','kubo') NOT NULL DEFAULT 'regular',
     rate_per_hour DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     status ENUM('available','occupied','maintenance') NOT NULL DEFAULT 'available',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -107,6 +107,7 @@ CREATE TABLE billiard_sessions (
     user_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     free_hour_used TINYINT(1) NOT NULL DEFAULT 0,
+    karaoke TINYINT(1) NOT NULL DEFAULT 0,
     CONSTRAINT fk_sesh_table FOREIGN KEY (table_id) REFERENCES tables(id) ON DELETE CASCADE,
     CONSTRAINT fk_sesh_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT fk_sesh_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
@@ -308,7 +309,7 @@ INSERT INTO tables (table_number, type, rate_per_hour, status) VALUES
 ('Table 2', 'regular', 120.00, 'available'),
 ('Table 3', 'vip',     150.00, 'available'),
 ('Table 4', 'vip',     150.00, 'available'),
-('Table 5', 'ktv',     200.00, 'available'),
+('Table 5', 'vip',     200.00, 'available'),
 ('Table 6', 'vip',     200.00, 'maintenance');
 
 INSERT INTO settings (skey, svalue) VALUES

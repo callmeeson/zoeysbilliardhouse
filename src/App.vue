@@ -255,6 +255,7 @@ const notifDotClass = (n) => ({
   stock: 'bg-amber-400',
   session: 'bg-brand-green',
   reservation: 'bg-sky-500',
+  ending: 'bg-red-500',
 }[n.type] || 'bg-brand-green')
 
 let notifTimer = null

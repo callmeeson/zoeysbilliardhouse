@@ -18,6 +18,19 @@ RewriteRule ^assets/(.*)$ dist/assets/$1 [L,QSA]
   Header always set X-Content-Type-Options "nosniff"
   Header always set X-Frame-Options "SAMEORIGIN"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+  # Never cache HTML/API responses: index.html references hashed asset names
+  # that change on every build. A stale cached copy loads chunk files that no
+  # longer exist, which makes lazy routes (e.g. Reports) render blank until a
+  # hard refresh.
+  Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  Header always set Pragma "no-cache"
+  Header always set Expires "0"
+
+  # Hashed build assets are content-addressed and can be cached aggressively.
+  <FilesMatch "\.(js|css|woff2?|png|svg|jpg|jpeg|gif|ico)$">
+    Header always set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
 </IfModule>
 
 # Hide PHP version banner (Apache mod_php)

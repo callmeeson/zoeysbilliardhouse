@@ -259,6 +259,44 @@
           <p class="mt-3 text-xs text-muted">The test email arrives in the recipient inbox — check spam if it doesn't show up.</p>
         </div>
       </div>
+
+      <div v-if="auth.isSuperadmin" class="card lg:col-span-2">
+        <div class="border-b border-line px-5 py-4">
+          <h2 class="text-sm font-semibold text-ink">Daily Transaction Report</h2>
+          <p class="mt-0.5 text-xs text-muted">Automatically emails yesterday's transactions as an Excel file</p>
+        </div>
+        <div class="p-5">
+          <label class="mb-3 flex cursor-pointer items-center gap-2 text-sm text-ink">
+            <input v-model="reportEnabled" type="checkbox" class="h-4 w-4 accent-emerald-600" />
+            Enable automatic daily report
+          </label>
+          <div class="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label class="form-label">Recipient Email</label>
+              <input v-model="form.email_report_recipient" type="email" class="form-input" placeholder="owner@example.com" />
+            </div>
+            <div>
+              <label class="form-label">Send Time</label>
+              <input v-model="form.email_report_time" type="time" class="form-input" />
+            </div>
+            <div>
+              <label class="form-label">Report Type</label>
+              <select v-model="form.email_report_type" class="form-select">
+                <option value="all">All (Billiard + POS)</option>
+                <option value="billiard">Billiard only</option>
+                <option value="pos">POS only</option>
+              </select>
+            </div>
+          </div>
+          <p class="mt-2 text-xs text-muted">Sent once a day after the send time, covering the previous day. All timestamps use 12-hour time.</p>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button class="btn btn-outline" :disabled="sending || !form.email_report_recipient.trim()" @click="sendReportNow">
+              <i class="bi bi-send"></i>{{ sending ? 'Sending...' : 'Send Now' }}
+            </button>
+            <span v-if="lastSentLabel" class="text-xs text-muted">Last sent: {{ lastSentLabel }}</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ============ BACKUP TAB ============ -->
@@ -401,7 +439,7 @@ const tabs = [
 
 const visibleTabs = computed(() => (auth.isAdmin ? tabs : tabs.filter((t) => t.key !== 'categories')))
 
-const form = reactive({ business_name: '', business_address: '', business_phone: '', business_logo: '', resend_api_key: '', resend_from_email: '' })
+const form = reactive({ business_name: '', business_address: '', business_phone: '', business_logo: '', resend_api_key: '', resend_from_email: '', email_report_enabled: '0', email_report_recipient: '', email_report_time: '08:00', email_report_type: 'all', email_report_last_sent: '' })
 const testEmail = ref('')
 const sending = ref(false)
 const shiftForm = ref({ id: 0, name: '', start_time: '08:00', end_time: '17:00', next_day: false })
@@ -409,6 +447,17 @@ const promos = ref([])
 const promoForm = ref({ id: 0, name: '', discount_percent: 50, start_time: '08:00', end_time: '12:00', is_active: true })
 
 const receiptDate = computed(() => new Date().toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }))
+const reportEnabled = computed({
+  get: () => form.email_report_enabled === '1',
+  set: (v) => { form.email_report_enabled = v ? '1' : '0' },
+})
+const lastSentLabel = computed(() => {
+  const s = form.email_report_last_sent
+  if (!s) return ''
+  const d = new Date(String(s).replace(' ', 'T'))
+  if (isNaN(d)) return s
+  return d.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+})
 const sysRows = computed(() => {
   if (!sysinfo.value) return []
   return [
@@ -614,6 +663,27 @@ const sendTest = async () => {
     }
   } catch (e) {
     toast(e.response?.data?.message || 'Could not send the test email.')
+  } finally {
+    sending.value = false
+  }
+}
+
+const sendReportNow = async () => {
+  if (!form.email_report_recipient.trim()) return toast('Set a recipient email first.')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_report_recipient.trim())) return toast('Enter a valid recipient email.')
+  sending.value = true
+  try {
+    const res = await settingsApi.sendReportNow()
+    if (res.data.ok) {
+      const d = new Date()
+      const pad = (n) => String(n).padStart(2, '0')
+      form.email_report_last_sent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+      toast(res.data.message || 'Report sent.', 'success')
+    } else {
+      toast(res.data.message || 'Failed to send the report.')
+    }
+  } catch (e) {
+    toast(e.response?.data?.message || 'Could not send the report.')
   } finally {
     sending.value = false
   }

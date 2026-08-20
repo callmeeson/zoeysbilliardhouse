@@ -26,7 +26,7 @@ switch ($action) {
 
     case 'save': {
         require_superadmin();
-        $keys = ['business_name', 'business_address', 'business_phone', 'promo_start', 'promo_end', 'promo_label', 'resend_from_email'];
+        $keys = ['business_name', 'business_address', 'business_phone', 'promo_start', 'promo_end', 'promo_label', 'resend_from_email', 'email_report_recipient', 'email_report_time', 'email_report_type'];
         $db = db();
         foreach ($keys as $key) {
             if (!array_key_exists($key, $_POST)) continue;
@@ -34,8 +34,23 @@ switch ($action) {
             if ($key === 'resend_from_email' && $value !== '' && !filter_var($value, FILTER_VALIDATE_EMAIL)) {
                 json_response(422, ['ok' => false, 'message' => 'The sender (from) email address is not valid.']);
             }
+            if ($key === 'email_report_recipient' && $value !== '' && !filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                json_response(422, ['ok' => false, 'message' => 'The report recipient email address is not valid.']);
+            }
+            if ($key === 'email_report_time' && $value !== '' && !preg_match('/^\d{2}:\d{2}$/', $value)) {
+                json_response(422, ['ok' => false, 'message' => 'Report time must be in HH:MM format.']);
+            }
+            if ($key === 'email_report_type' && !in_array($value, ['all', 'billiard', 'pos'], true)) {
+                json_response(422, ['ok' => false, 'message' => 'Report type must be All, Billiard or POS.']);
+            }
             $db->prepare("INSERT INTO settings (skey, svalue) VALUES (?,?) ON DUPLICATE KEY UPDATE svalue = VALUES(svalue)")
                 ->execute([$key, $value]);
+        }
+        // Toggle for the automatic report (checkbox posts 1 or nothing).
+        if (array_key_exists('email_report_enabled', $_POST)) {
+            $enabled = ((string)$_POST['email_report_enabled'] === '1' || (string)$_POST['email_report_enabled'] === 'on') ? '1' : '0';
+            $db->prepare("INSERT INTO settings (skey, svalue) VALUES ('email_report_enabled', ?) ON DUPLICATE KEY UPDATE svalue = VALUES(svalue)")
+                ->execute([$enabled]);
         }
         // The API key is masked in reads; an untouched (masked) or blank value
         // keeps the current key, anything else replaces it.
@@ -143,6 +158,25 @@ switch ($action) {
             . '</div>');
         audit_log('email_test', "Test email to {$to} — " . ($res['ok'] ? 'sent' : 'failed: ' . $res['message']));
         json_response($res['ok'] ? 200 : 422, ['ok' => $res['ok'], 'message' => $res['message']]);
+    }
+    break;
+
+    case 'send_report_now': {
+        require_superadmin();
+        $to = get_setting('email_report_recipient', '');
+        if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            json_response(422, ['ok' => false, 'message' => 'Set a valid report recipient email first.']);
+        }
+        $yesterday = date('Y-m-d', strtotime('yesterday'));
+        $res = send_daily_transaction_report($to, $yesterday, $yesterday, get_setting('email_report_type', 'all'));
+        if ($res['ok']) {
+            db()->prepare("INSERT INTO settings (skey, svalue) VALUES ('email_report_last_sent', ?) ON DUPLICATE KEY UPDATE svalue = VALUES(svalue)")
+                ->execute([date('Y-m-d H:i:s')]);
+            audit_log('email_report', "Manual report sent to {$to} — " . $res['message']);
+            json_response(200, ['ok' => true, 'message' => $res['message']]);
+        }
+        audit_log('email_report', "Manual report to {$to} FAILED — " . $res['message']);
+        json_response(422, ['ok' => false, 'message' => $res['message']]);
     }
     break;
 

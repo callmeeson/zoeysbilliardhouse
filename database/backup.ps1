@@ -1,5 +1,11 @@
+<#
+    Nightly database dump. Works with Laragon or XAMPP: mysqldump.exe is
+    auto-detected (Laragon's versioned bin folder first, then XAMPP, then PATH)
+    so the scheduled task keeps working after a MySQL version upgrade.
+    Override with -Mysqldump if your stack lives somewhere else.
+#>
 param(
-    [string]$Mysqldump = 'C:\xampp\mysql\bin\mysqldump.exe',
+    [string]$Mysqldump,
     [string]$DbHost = $env:ZB_DB_HOST,
     [string]$DbName = $env:ZB_DB_NAME,
     [string]$DbUser = $env:ZB_DB_USER,
@@ -11,6 +17,26 @@ $ErrorActionPreference = 'Stop'
 if (-not $DbHost) { $DbHost = 'localhost' }
 if (-not $DbName) { $DbName = 'zoeys_billiard' }
 if (-not $DbUser) { $DbUser = 'root' }
+
+if (-not $Mysqldump) {
+    # Laragon keeps MySQL in a versioned folder (bin\mysql\mysql-8.4.3-winx64\bin);
+    # sort descending so the newest version wins.
+    foreach ($glob in @('C:\laragon\bin\mysql\*\bin\mysqldump.exe', 'C:\xampp\mysql\bin\mysqldump.exe')) {
+        $hit = Get-ChildItem -Path $glob -ErrorAction SilentlyContinue |
+               Sort-Object FullName -Descending | Select-Object -First 1
+        if ($hit) { $Mysqldump = $hit.FullName; break }
+    }
+}
+if (-not $Mysqldump) {
+    $cmd = Get-Command mysqldump -ErrorAction SilentlyContinue
+    if ($cmd) { $Mysqldump = $cmd.Source }
+}
+if (-not $Mysqldump -or -not (Test-Path -LiteralPath $Mysqldump)) {
+    Write-Error 'mysqldump.exe not found. Looked in Laragon (C:\laragon\bin\mysql\*\bin), XAMPP (C:\xampp\mysql\bin) and PATH. Pass -Mysqldump "<full path>".'
+    exit 1
+}
+Write-Host "Using mysqldump: $Mysqldump"
+
 
 $outDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'backups'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null

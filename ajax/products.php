@@ -37,17 +37,35 @@ switch ($action) {
         if (in_array($status, ['active', 'inactive'], true)) { $sql .= " AND p.status = ?"; $params[] = $status; }
         if ($cat > 0) { $sql .= " AND p.category_id = ?"; $params[] = $cat; }
         $sql .= " ORDER BY p.name";
+        $rows = db_all($sql, $params);
 
-        header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
-        $out = fopen('php://output', 'w');
-        fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
-        fputcsv($out, ['Name', 'Category', 'Supplier', 'Buying Price', 'Selling Price', 'Stock', 'Low Stock', 'Status']);
-        foreach (db_all($sql, $params) as $r) {
-            fputcsv($out, [$r['name'], $r['category'] ?? '', $r['supplier'] ?? '',
-                           $r['buying_price'], $r['selling_price'], $r['stock'], $r['low_stock'], $r['status']]);
+        $headers = ['Name', 'Category', 'Supplier', 'Buying Price', 'Selling Price', 'Stock', 'Low Stock', 'Status'];
+
+        // Excel 2003 XML Spreadsheet — a native Excel format that needs no PHP library.
+        header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.xls"');
+        echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+        echo "<?mso-application progid=\"Excel.Sheet\"?>\n";
+        echo '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"';
+        echo ' xmlns:o="urn:schemas-microsoft-com:office:office"';
+        echo ' xmlns:x="urn:schemas-microsoft-com:office:excel"';
+        echo ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' . "\n";
+        echo '<Worksheet ss:Name="Products"><Table>' . "\n";
+        echo '<Row>';
+        foreach ($headers as $h) {
+            echo '<Cell><Data ss:Type="String">' . htmlspecialchars((string)$h, ENT_XML1, 'UTF-8') . '</Data></Cell>';
         }
-        fclose($out);
+        echo '</Row>' . "\n";
+        foreach ($rows as $r) {
+            $vals = [$r['name'], $r['category'] ?? '', $r['supplier'] ?? '',
+                     $r['buying_price'], $r['selling_price'], $r['stock'], $r['low_stock'], $r['status']];
+            echo '<Row>';
+            foreach ($vals as $v) {
+                echo '<Cell><Data ss:Type="String">' . htmlspecialchars((string)$v, ENT_XML1, 'UTF-8') . '</Data></Cell>';
+            }
+            echo '</Row>' . "\n";
+        }
+        echo '</Table></Worksheet></Workbook>';
         exit;
     }
     break;

@@ -434,6 +434,74 @@
       </div>
     </div>
 
+    <!-- ============ TABLES & DEAD TIME TAB ============ -->
+    <div v-if="tab === 'tables'">
+      <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div class="card p-5">
+          <div class="text-xs font-medium text-muted">Total Play Hours</div>
+          <div class="mt-1 text-xl font-bold tabular-nums text-brand-green">{{ fmtHrs(deadTotals.play) }}</div>
+          <p class="mt-0.5 text-xs text-muted">{{ store.deadTime?.shift_name }} window</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-xs font-medium text-muted">Total Dead Hours</div>
+          <div class="mt-1 text-xl font-bold tabular-nums text-brand-red">{{ fmtHrs(deadTotals.dead) }}</div>
+          <p class="mt-0.5 text-xs text-muted">No play inside shift window</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-xs font-medium text-muted">Utilization</div>
+          <div class="mt-1 text-xl font-bold tabular-nums text-brand-gold-strong">{{ deadTotals.util.toFixed(1) }}%</div>
+          <p class="mt-0.5 text-xs text-muted">Play / (play + dead)</p>
+        </div>
+        <div class="card p-5">
+          <div class="text-xs font-medium text-muted">Most Idle Table</div>
+          <div class="mt-1 text-xl font-bold tabular-nums text-ink">{{ deadTotals.worst?.table_number || '—' }}</div>
+          <p class="mt-0.5 text-xs text-muted">{{ deadTotals.worst ? `${fmtHrs(deadTotals.worst.dead_hours)} dead` : 'No data' }}</p>
+        </div>
+      </div>
+
+      <div v-if="!dayMatrices.length" class="card py-10 text-center text-sm text-muted">No data for this period.</div>
+
+      <!-- One DEAD TIME matrix per business day -->
+      <div v-for="dm in pagedDayMatrices" :key="dm.date" class="card mb-4 overflow-hidden">
+        <div class="border-b border-line px-5 py-4">
+          <h2 class="text-sm font-semibold text-ink">Dead Time — {{ formatDate(dm.date) }}</h2>
+          <p class="mt-0.5 text-xs text-muted">{{ dm.shift_name }} window</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[1100px] border-collapse text-center text-xs">
+            <thead>
+              <tr>
+                <th :colspan="dm.tables.length * 2" class="border border-line bg-elevated py-2.5 text-sm font-bold tracking-wide text-ink">DEAD TIME</th>
+              </tr>
+              <tr>
+                <template v-for="t in dm.tables" :key="t.table_id">
+                  <th class="border border-line bg-elevated px-2 py-1.5 font-bold text-ink">{{ t.table_number }}</th>
+                  <th class="border border-line bg-elevated px-2 py-1.5 font-semibold text-muted">HOUR/MINS</th>
+                </template>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, i) in dm.rows" :key="i">
+                <template v-for="(cell, j) in row" :key="j">
+                  <td class="whitespace-nowrap border border-line px-2 py-1.5 font-medium text-ink">{{ cell.window }}</td>
+                  <td class="whitespace-nowrap border border-line px-2 py-1.5 tabular-nums text-muted">{{ cell.dur }}</td>
+                </template>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Day pagination -->
+      <div v-if="dayMatrices.length > DEAD_PAGE_SIZE" class="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-line bg-panel px-4 py-3">
+        <span class="text-xs text-muted">{{ dayMatrices.length }} days · page {{ deadPage }} of {{ deadPages }}</span>
+        <div class="flex gap-1">
+          <button class="btn btn-outline btn-sm" :disabled="deadPage <= 1" @click="deadPage--"><i class="bi bi-chevron-left"></i> Prev</button>
+          <button class="btn btn-outline btn-sm" :disabled="deadPage >= deadPages" @click="deadPage++">Next <i class="bi bi-chevron-right"></i></button>
+        </div>
+      </div>
+    </div>
+
     <!-- Transaction details modal -->
     <Modal v-if="details" title="Transaction Details" @close="details = null">
       <div class="mb-3 space-y-1 text-sm">
@@ -461,6 +529,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Banknote, PiggyBank, ReceiptText, Percent } from '@lucide/vue'
 import { confirmBox, toast } from '@/utils/dialogs'
+import { exportExcel, exportExcelWorkbook, formatExcelDateTime } from '@/utils/export'
 import { useReportsStore } from '@/stores/reports'
 import { useAuthStore } from '@/stores/auth'
 import Modal from '@/components/ui/Modal.vue'
@@ -477,6 +546,7 @@ const tabs = [
   { key: 'summary', label: 'Summary', icon: 'bi bi-speedometer2' },
   { key: 'products', label: 'Products & Profit', icon: 'bi bi-box-seam' },
   { key: 'inventory', label: 'Inventory & Suppliers', icon: 'bi bi-boxes' },
+  { key: 'tables', label: 'Tables & Dead Time', icon: 'bi bi-table' },
 ]
 
 /* --- KPI cards --- */
@@ -549,6 +619,9 @@ const exportOptions = computed(() => {
       { key: 'logs', label: 'Stock Activity' },
     ]
   }
+  if (tab.value === 'tables') {
+    return [{ key: 'deadMatrix', label: 'Dead Time Matrix (per day)' }]
+  }
   return [
     { key: 'byDay', label: 'Sales by Day' },
     { key: 'byPayment', label: 'Sales by Payment' },
@@ -559,7 +632,7 @@ const exportOptions = computed(() => {
 })
 const runExport = (key) => {
   exportOpen.value = false
-  const map = { byDay: exportByDay, byPayment: exportByPayment, monthly: exportMonthly, topProducts: exportTopProducts, transactions: exportTransactions, products: exportProducts, valuation: exportValuation, suppliers: exportSuppliers, logs: exportLogs }
+  const map = { byDay: exportByDay, byPayment: exportByPayment, monthly: exportMonthly, topProducts: exportTopProducts, transactions: exportTransactions, products: exportProducts, valuation: exportValuation, suppliers: exportSuppliers, logs: exportLogs, deadMatrix: exportDeadMatrix }
   map[key]?.()
 }
 
@@ -571,6 +644,7 @@ const loadAll = async () => {
   const jobs = [store.fetchSummary(), store.fetchTransactions()]
   if (tab.value === 'products') jobs.push(store.fetchProductsReport())
   if (tab.value === 'inventory') jobs.push(store.fetchInventory())
+  if (tab.value === 'tables') jobs.push(store.fetchDeadTime())
   await Promise.all(jobs)
 }
 
@@ -578,6 +652,7 @@ const switchTab = (key) => {
   tab.value = key
   if (key === 'products' && !store.products.length) store.fetchProductsReport()
   if (key === 'inventory' && !store.inventory) store.fetchInventory()
+  if (key === 'tables' && !store.deadTime) store.fetchDeadTime()
 }
 
 const setType = (type) => {
@@ -681,73 +756,140 @@ const productReport = computed(() => ({
   total_stock: (store.products || []).reduce((s, p) => s + Number(p.stock || 0), 0),
 }))
 
-/* --- CSV exports --- */
+/* --- Excel exports --- */
 
-const escCsv = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"'
-const downloadCsv = (csv, name) => {
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
-}
 const rangeName = () => `-${store.filters.from}-to-${store.filters.to}`
 
 const exportByDay = () => {
   const list = store.summary?.by_day || []
-  const csv = ['Date,Txns,Total', ...list.map((d) => [d.d, d.cnt, d.total].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `sales-by-day${rangeName()}.csv`)
+  const rows = list.map((d) => [d.d, d.cnt, d.total])
+  exportExcel(`sales-by-day${rangeName()}.xlsx`, 'Sales by Day', ['Date', 'Txns', 'Total'], rows)
 }
 const exportByPayment = () => {
   const list = store.summary?.by_payment || []
-  const csv = ['Payment Method,Txns,Total', ...list.map((p) => [p.payment_method, p.cnt, p.total].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `sales-by-payment${rangeName()}.csv`)
+  const rows = list.map((p) => [p.payment_method, p.cnt, p.total])
+  exportExcel(`sales-by-payment${rangeName()}.xlsx`, 'Sales by Payment', ['Payment Method', 'Txns', 'Total'], rows)
 }
 const exportTopProducts = () => {
   const list = topProducts.value
-  const csv = ['Product,Units Sold,Revenue,Buying Cost,Profit', ...list.map((p) => [p.product_name, p.qty, p.revenue, p.cost, Number(p.revenue) - Number(p.cost)].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `top-products-by-${topSort.value}${rangeName()}.csv`)
+  const rows = list.map((p) => [p.product_name, p.qty, p.revenue, p.cost, Number(p.revenue) - Number(p.cost)])
+  exportExcel(`top-products-by-${topSort.value}${rangeName()}.xlsx`, 'Top Products', ['Product', 'Units Sold', 'Revenue', 'Buying Cost', 'Profit'], rows)
 }
 const exportMonthly = () => {
   const list = store.summary?.monthly || []
-  const csv = ['Month,Txns,Total', ...list.map((m) => [m.m, m.cnt, m.total].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `monthly-sales${rangeName()}.csv`)
+  const rows = list.map((m) => [m.m, m.cnt, m.total])
+  exportExcel(`monthly-sales${rangeName()}.xlsx`, 'Monthly Sales', ['Month', 'Txns', 'Total'], rows)
 }
+
 const exportTransactions = () => {
   const list = store.transactions
-  const fmt = (dt) => {
-    const d = new Date(dt)
-    if (isNaN(d)) return ''
-    const pad = (n) => String(n).padStart(2, '0')
-    const h = d.getHours()
-    const hour12 = h % 12 === 0 ? 12 : h % 12
-    const ampm = h < 12 ? 'AM' : 'PM'
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hour12}:${pad(d.getMinutes())} ${ampm}`
-  }
-  const csv = ['Reference,Date,Cashier,Type,Total,Status', ...list.map((t) => [t.reference, fmt(t.created_at), t.cashier, t.billiard_amount > 0 ? 'Billiard' : 'POS', t.total, t.status].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `transactions${rangeName()}.csv`)
+  const rows = list.map((t) => [t.reference, formatExcelDateTime(t.created_at), t.cashier, t.billiard_amount > 0 ? 'Billiard' : 'POS', t.total, t.status])
+  exportExcel(`transactions${rangeName()}.xlsx`, 'Transactions', ['Reference', 'Date', 'Cashier', 'Type', 'Total', 'Status'], rows)
 }
 const exportProducts = () => {
   const list = store.products
-  const csv = ['Product,Supplier,Units Sold,Revenue,Buying Cost,Profit,Margin %,Stock', ...list.map((p) => [p.name, p.supplier, p.units_sold, p.revenue, p.cost, p.profit, margin(p).toFixed(1), p.stock].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `product-profit${rangeName()}.csv`)
+  const rows = list.map((p) => [p.name, p.supplier, p.units_sold, p.revenue, p.cost, p.profit, margin(p).toFixed(1), p.stock])
+  exportExcel(`product-profit${rangeName()}.xlsx`, 'Products', ['Product', 'Supplier', 'Units Sold', 'Revenue', 'Buying Cost', 'Profit', 'Margin %', 'Stock'], rows)
 }
 const exportValuation = () => {
   const list = store.inventory?.valuation || []
-  const csv = ['Product,Supplier,Stock,Buying Price,Stock Value,Status', ...list.map((v) => [v.name, v.supplier, v.stock, v.buying_price, v.stock_value, v.status].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `stock-valuation${rangeName()}.csv`)
+  const rows = list.map((v) => [v.name, v.supplier, v.stock, v.buying_price, v.stock_value, v.status])
+  exportExcel(`stock-valuation${rangeName()}.xlsx`, 'Stock Valuation', ['Product', 'Supplier', 'Stock', 'Buying Price', 'Stock Value', 'Status'], rows)
 }
 const exportSuppliers = () => {
   const list = store.inventory?.suppliers || []
-  const csv = ['Supplier,Drops,Qty,Last Restock', ...list.map((s) => [s.supplier, s.drops, s.qty, s.last_restock].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `restock-by-supplier${rangeName()}.csv`)
+  const rows = list.map((s) => [s.supplier, s.drops, s.qty, formatExcelDateTime(s.last_restock)])
+  exportExcel(`restock-by-supplier${rangeName()}.xlsx`, 'Suppliers', ['Supplier', 'Drops', 'Qty', 'Last Restock'], rows)
 }
 const exportLogs = () => {
   const list = store.inventory?.logs || []
-  const csv = ['Date,Product,Change,Supplier,Reason,Cashier', ...list.map((l) => [l.created_at, l.product, l.change_qty, l.supplier, l.reason, l.cashier].map(escCsv).join(','))].join('\n')
-  downloadCsv(csv, `stock-activity${rangeName()}.csv`)
+  const rows = list.map((l) => [formatExcelDateTime(l.created_at), l.product, l.change_qty, l.supplier, l.reason, l.cashier])
+  exportExcel(`stock-activity${rangeName()}.xlsx`, 'Stock Activity', ['Date', 'Product', 'Change', 'Supplier', 'Reason', 'Cashier'], rows)
+}
+
+/* --- dead time helpers & exports --- */
+
+const deadSummary = computed(() => store.deadTime?.summary || [])
+const deadTotals = computed(() => {
+  const list = deadSummary.value
+  const play = list.reduce((s, r) => s + Number(r.play_hours), 0)
+  const dead = list.reduce((s, r) => s + Number(r.dead_hours), 0)
+  const util = play + dead > 0 ? (play / (play + dead)) * 100 : 0
+  const worst = list.reduce((m, r) => (m && Number(m.dead_hours) >= Number(r.dead_hours) ? m : r), null)
+  return { play, dead, util, worst }
+})
+const fmtHrs = (h) => {
+  const totalMin = Math.round(Number(h || 0) * 60)
+  const hh = Math.floor(totalMin / 60)
+  const mm = totalMin % 60
+  return hh > 0 ? `${hh}h ${mm}m` : `${mm}m`
+}
+// "08:00 AM", "02:00 AM" (12-hour, zero-padded hour)
+const fmtTime = (dt) => {
+  const d = new Date(dt)
+  if (isNaN(d)) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  const h = d.getHours()
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${pad(h12)}:${pad(d.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`
+}
+// "02 hrs 36 min", "30 min", "18 Hrs."
+const fmtDur = (secs) => {
+  const m = Math.round(secs / 60)
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  if (h === 0) return `${mm} min`
+  if (mm === 0) return `${h} Hrs.`
+  const hr = h === 1 ? 'hr' : 'hrs'
+  return `${String(h).padStart(2, '0')} ${hr} ${String(mm).padStart(2, '0')} min`
+}
+const tsDiff = (w) => Math.round((new Date(w.end) - new Date(w.start)) / 1000)
+const winText = (w) => `${fmtTime(w.start)} – ${fmtTime(w.end)}`
+
+const dayMatrices = computed(() =>
+  (store.deadTime?.days || []).map((d) => {
+    const tables = d.tables || []
+    const maxRows = tables.reduce((m, t) => Math.max(m, t.dead_windows.length), 0)
+    const rows = []
+    for (let i = 0; i < maxRows; i++) {
+      rows.push(
+        tables.map((t) => {
+          const w = t.dead_windows[i]
+          return w ? { window: winText(w), dur: fmtDur(tsDiff(w)) } : { window: '', dur: '' }
+        })
+      )
+    }
+    return { date: d.date, shift_name: d.shift_name, tables, rows }
+  })
+)
+
+const DEAD_PAGE_SIZE = 7
+const deadPage = ref(1)
+const deadPages = computed(() => Math.max(1, Math.ceil(dayMatrices.value.length / DEAD_PAGE_SIZE)))
+const pagedDayMatrices = computed(() => {
+  const start = (deadPage.value - 1) * DEAD_PAGE_SIZE
+  return dayMatrices.value.slice(start, start + DEAD_PAGE_SIZE)
+})
+watch(() => dayMatrices.value.length, () => {
+  if (deadPage.value > deadPages.value) deadPage.value = deadPages.value
+})
+watch(() => [store.filters.from, store.filters.to, store.filters.shift_id], () => {
+  deadPage.value = 1
+})
+
+const formatDate = (d) => {
+  const [y, m, day] = String(d || '').split('-')
+  return y && m && day ? `${MONTHS[Number(m) - 1]} ${Number(day)}, ${y}` : '—'
+}
+
+const exportDeadMatrix = () => {
+  const sheets = dayMatrices.value.map((dm) => {
+    const aoa = [['DEAD TIME']]
+    aoa.push(dm.tables.flatMap((t) => [t.table_number, 'HOUR/MINS']))
+    dm.rows.forEach((row) => aoa.push(row.flatMap((c) => [c.window, c.dur])))
+    return { name: dm.date, aoa }
+  })
+  if (sheets.length) exportExcelWorkbook(`dead-time-matrix${rangeName()}.xlsx`, sheets)
 }
 
 /* --- helpers --- */

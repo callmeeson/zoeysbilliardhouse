@@ -249,6 +249,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { confirmBox, toast } from '@/utils/dialogs'
+import { exportExcel } from '@/utils/export'
 import { productsApi } from '@/api/services'
 import { useProductsStore } from '@/stores/products'
 import { useAuthStore } from '@/stores/auth'
@@ -315,24 +316,10 @@ const openImport = () => {
   setTimeout(() => fileInput.value?.click(), 50)
 }
 
-const exportProducts = async () => {
-  try {
-    const res = await productsApi.exportProducts({
-      q: search.value,
-      status: statusFilter.value,
-      category: categoryFilter.value || undefined,
-    })
-    const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `products-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-    toast('Products exported.', 'success')
-  } catch (e) {
-    toast('Export failed: ' + (e.message || 'Please try again.'))
-  }
+const exportProducts = () => {
+  const rows = filteredProducts.value.map((p) => [p.name, p.category ?? '', p.supplier ?? '', p.buying_price, p.selling_price, p.stock, p.low_stock, p.status])
+  exportExcel(`products-${new Date().toISOString().slice(0, 10)}.xlsx`, 'Products', ['Name', 'Category', 'Supplier', 'Buying Price', 'Selling Price', 'Stock', 'Low Stock', 'Status'], rows)
+  toast('Products exported.', 'success')
 }
 
 const onImportFile = async (e) => {

@@ -8,6 +8,7 @@ export const useReportsStore = defineStore('reports', () => {
   const transactionsTotal = ref(0)
   const products = ref([])
   const inventory = ref(null)
+  const deadTime = ref(null)
   const cashiers = ref([])
   const shifts = ref([])
   const loading = ref(false)
@@ -73,6 +74,19 @@ export const useReportsStore = defineStore('reports', () => {
     }
   }
 
+  async function fetchDeadTime() {
+    loading.value = true
+    try {
+      const response = await reportsApi.deadTime(filters.value)
+      if (response.data.ok) {
+        deadTime.value = response.data
+      }
+      return response.data
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function fetchCashiers() {
     const response = await reportsApi.cashiers()
     if (response.data.ok) {
@@ -91,6 +105,51 @@ export const useReportsStore = defineStore('reports', () => {
 
   async function voidTransaction(id) {
     const response = await reportsApi.void(id)
+    if (response.data.ok) {
+      await fetchTransactions()
+      await fetchSummary()
+    }
+    return response.data
+  }
+
+  async function updateTransaction(data) {
+    const response = await reportsApi.updateSale(data)
+    if (response.data.ok) {
+      await fetchTransactions()
+      await fetchSummary()
+    }
+    return response.data
+  }
+
+  async function addMissingSession(data) {
+    const response = await reportsApi.addMissingSession(data)
+    if (response.data.ok) {
+      await fetchTransactions()
+      await fetchSummary()
+    }
+    return response.data
+  }
+
+  async function addMissingSale(data) {
+    const response = await reportsApi.addMissingSale(data)
+    if (response.data.ok) {
+      await fetchTransactions()
+      await fetchSummary()
+    }
+    return response.data
+  }
+
+  async function deleteTransaction(id) {
+    const response = await reportsApi.deleteSale(id)
+    if (response.data.ok) {
+      await fetchTransactions()
+      await fetchSummary()
+    }
+    return response.data
+  }
+
+  async function extendClosedSession(data) {
+    const response = await reportsApi.extendClosedSession(data)
     if (response.data.ok) {
       await fetchTransactions()
       await fetchSummary()
@@ -118,6 +177,7 @@ export const useReportsStore = defineStore('reports', () => {
     transactionsTotal,
     products,
     inventory,
+    deadTime,
     cashiers,
     shifts,
     loading,
@@ -126,9 +186,15 @@ export const useReportsStore = defineStore('reports', () => {
     fetchTransactions,
     fetchProductsReport,
     fetchInventory,
+    fetchDeadTime,
     fetchCashiers,
     fetchShifts,
     voidTransaction,
+    updateTransaction,
+    addMissingSession,
+    addMissingSale,
+    deleteTransaction,
+    extendClosedSession,
     setFilters,
     resetFilters,
   }

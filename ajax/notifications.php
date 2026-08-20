@@ -25,12 +25,24 @@ switch ($action) {
         }
 
         $sessions = db_all("
-            SELECT bs.id, bs.start_time, t.table_number
+            SELECT bs.id, bs.start_time, bs.end_time, t.table_number
             FROM billiard_sessions bs JOIN tables t ON t.id = bs.table_id
             WHERE bs.status = 'open'
             ORDER BY bs.start_time
         ");
         foreach ($sessions as $s) {
+            // Last 10 minutes of paid time — staff should remind the customer.
+            $remaining = strtotime($s['end_time']) - time();
+            if ($remaining > 0 && $remaining <= 600) {
+                $mins = max(1, (int)ceil($remaining / 60));
+                $notifications[] = [
+                    'id' => 'ending-' . $s['id'],
+                    'type' => 'ending',
+                    'title' => 'Table ' . $s['table_number'] . ' ends in ' . $mins . ' min — remind customer',
+                    'time' => 'Last 10 minutes',
+                ];
+            }
+
             $mins = (int)((time() - strtotime($s['start_time'])) / 60);
             $title = 'Table ' . $s['table_number'] . ' session running';
             if ($mins >= 60) {

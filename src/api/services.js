@@ -109,7 +109,23 @@ export const reportsApi = {
   transactions: (params) => api.get('reports.php', { params: { action: 'transactions', ...params } }),
   products: (params) => api.get('reports.php', { params: { action: 'products', ...params } }),
   inventory: (params) => api.get('reports.php', { params: { action: 'inventory', ...params } }),
+  deadTime: (params) => api.get('reports.php', { params: { action: 'table_dead_time', ...params } }),
   void: (id) => api.post('reports.php', new URLSearchParams({ action: 'void', id }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
+  updateSale: (data) => api.post('reports.php', new URLSearchParams({ action: 'update_sale', ...data }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
+  addMissingSession: (data) => api.post('reports.php', new URLSearchParams({ action: 'add_missing_session', ...data }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
+  addMissingSale: (data) => api.post('reports.php', new URLSearchParams({ action: 'add_missing_pos_sale', ...data }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
+  deleteSale: (id) => api.post('reports.php', new URLSearchParams({ action: 'delete_sale', id }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
+  extendClosedSession: (data) => api.post('reports.php', new URLSearchParams({ action: 'extend_closed_session', ...data }), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   }),
   cashiers: () => api.get('reports.php', { params: { action: 'cashiers' } }),
@@ -151,6 +167,9 @@ export const settingsApi = {
   backup: () => api.get('settings.php', { params: { action: 'backup' }, responseType: 'blob' }),
   sysinfo: () => api.get('settings.php', { params: { action: 'sysinfo' } }),
   sendTestEmail: (to) => api.post('settings.php', new URLSearchParams({ action: 'send_test_email', to }), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  }),
+  sendReportNow: () => api.post('settings.php', new URLSearchParams({ action: 'send_report_now' }), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   }),
 }

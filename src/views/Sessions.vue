@@ -14,14 +14,27 @@
       </div>
     </div>
 
+    <!-- Ending soon banner -->
+    <div v-if="endingSoonSessions.length" class="mb-4 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-3.5">
+      <div class="flex items-center gap-2 text-sm font-bold text-amber-600 dark:text-amber-400">
+        <Timer :size="15" /> Ending within 10 minutes
+      </div>
+      <div class="mt-2 flex flex-wrap gap-2 text-xs">
+        <span
+          v-for="s in endingSoonSessions"
+          :key="s.id"
+          class="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2.5 py-1 font-semibold tabular-nums text-amber-600 dark:text-amber-400"
+        >Table {{ s.table.table_number }} — {{ hms(timeLeft(s)) }} left</span>
+      </div>
+    </div>
+
     <!-- Quick Actions -->
     <div class="mb-4 rounded-2xl border border-line bg-panel p-4">
       <div class="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Quick Actions</div>
       <div class="flex flex-wrap gap-2">
-        <button class="qa-btn qa-blue" @click="openSelectTable('regular')"><Play :size="14" /> Start REG Table</button>
+        <button class="qa-btn qa-blue" @click="openSelectTable('regular')"><Play :size="14" /> Start Regular Table</button>
         <button class="qa-btn qa-gold" @click="openSelectTable('vip')"><Star :size="14" /> Start VIP</button>
-        <button class="qa-btn qa-purple" @click="openSelectTable('ktv')"><Music4 :size="14" /> Start KTV</button>
-        <button class="qa-btn qa-green" @click="openSelectTable('kubo')"><Home :size="14" /> Rent Kubo</button>
+        <button class="qa-btn qa-green" @click="openSelectTable('kubo')"><Home :size="14" /> Kubo Rental</button>
         <button class="qa-btn qa-indigo" @click="openReservation"><CalendarPlus :size="14" /> Reservations</button>
       </div>
     </div>
@@ -67,7 +80,7 @@
               <tbody>
                 <tr v-for="s in group.rows" :key="s.id" class="border-b border-line/70 last:border-0 hover:bg-elevated/40 transition-colors">
                   <td class="px-3.5 py-3 font-bold text-ink">{{ s.table.table_number }}</td>
-                  <td class="px-3.5 py-3 text-muted">{{ typeLabel(s.table.type) }}</td>
+                  <td class="px-3.5 py-3 text-muted">{{ typeLabel(s.table.type) }}<span v-if="s.table.type === 'vip'" class="block text-xs text-brand-gold-strong">{{ Number(s.karaoke) ? 'With Karaoke' : 'Without Karaoke' }}</span></td>
                   <td class="px-3.5 py-3">
                     <div class="font-medium text-ink">{{ s.customer_name || 'Walk-in' }}</div>
                     <div v-if="s.customer_id" class="mt-0.5 flex items-center gap-1 text-xs text-muted">
@@ -79,7 +92,7 @@
                   <td class="px-3.5 py-3 font-mono text-xs text-muted">{{ formatTime(s.start_time) }}</td>
                   <td class="px-3.5 py-3 font-mono text-xs text-muted">{{ formatTime(scheduledEnd(s)) }}</td>
                   <td class="px-3.5 py-3">
-                    <span class="inline-block rounded-full px-2.5 py-1 font-mono text-xs font-bold tabular-nums" :class="timeLeft(s) > 0 ? 'bg-elevated text-ink' : 'bg-red-500/10 text-red-500'">{{ timeLeft(s) > 0 ? hms(timeLeft(s)) : 'TIME OUT' }}</span>
+                    <span class="inline-block rounded-full px-2.5 py-1 font-mono text-xs font-bold tabular-nums" :class="timeLeft(s) > 600 ? 'bg-elevated text-ink' : (timeLeft(s) > 0 ? 'bg-amber-400/15 text-amber-600 animate-pulse dark:text-amber-400' : 'bg-red-500/10 text-red-500')">{{ timeLeft(s) > 0 ? hms(timeLeft(s)) : 'TIME OUT' }}</span>
                   </td>
                   <td class="px-3.5 py-3">
                     <div class="flex items-center justify-end gap-1.5">
@@ -163,6 +176,14 @@
               </span>
             </button>
           </div>
+        </div>
+      </div>
+
+      <div v-if="startTable.type === 'vip'" class="mb-3 rounded-xl border border-brand-gold-strong/40 bg-brand-gold/5 p-3">
+        <label class="label">Karaoke</label>
+        <div class="flex gap-2">
+          <button type="button" class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold" :class="startForm.karaoke ? 'bg-brand-gold-strong text-white' : 'bg-elevated text-ink'" @click="startForm.karaoke = true">With Karaoke</button>
+          <button type="button" class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold" :class="!startForm.karaoke ? 'bg-brand-gold-strong text-white' : 'bg-elevated text-ink'" @click="startForm.karaoke = false">Without Karaoke</button>
         </div>
       </div>
 
@@ -492,7 +513,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
-  Play, Star, Music4, Home, RefreshCw, ListChecks, TimerOff, Loader2, AlertTriangle,
+  Play, Star, Home, RefreshCw, ListChecks, TimerOff, Timer, Loader2, AlertTriangle,
   PlusCircle, Square, X, Users, Percent, Search, CalendarPlus, CheckCircle2, Stamp, CalendarCheck,
 } from '@lucide/vue'
 import { useTablesStore } from '@/stores/tables'
@@ -511,7 +532,6 @@ const settingsStore = useSettingsStore()
 const TYPE_META = {
   regular: { label: 'Regular', group: 'Regular Tables', dot: 'bg-brand-green' },
   vip: { label: 'VIP', group: 'VIP Tables', dot: 'bg-amber-400' },
-  ktv: { label: 'KTV Room', group: 'KTV Rooms', dot: 'bg-purple-500' },
   kubo: { label: 'Kubo', group: 'Kubo', dot: 'bg-sky-500' },
 }
 const groupDot = computed(() => {
@@ -568,6 +588,13 @@ const settings = computed(() => settingsStore.settings)
 
 const openSessions = computed(() => store.openSessions)
 
+const endingSoonSessions = computed(() =>
+  openSessions.value.filter((s) => {
+    const t = timeLeft(s)
+    return t > 0 && t <= 600
+  })
+)
+
 const activePromo = computed(() => {
   const h = new Date().getHours()
   return promos.value.find((p) => {
@@ -583,7 +610,7 @@ const promoStartText = computed(() => activePromo.value?.start_time || '—')
 const promoEndText = computed(() => activePromo.value?.end_time || '—')
 
 const groupedSessions = computed(() => {
-  const order = ['regular', 'vip', 'ktv', 'kubo']
+  const order = ['regular', 'vip', 'kubo']
   return order
     .map((type) => {
       const rows = openSessions.value.filter((s) => (s.table.type || 'regular') === type)
@@ -657,7 +684,7 @@ onUnmounted(() => {
 })
 
 function emptyStartForm() {
-  return { isWalkIn: true, walkin_name: '', hours: 1, promo: false, freeHour: false, payment: 0 }
+  return { isWalkIn: true, walkin_name: '', hours: 1, promo: false, freeHour: false, karaoke: false, payment: 0 }
 }
 function emptyResForm() {
   const today = new Date().toISOString().slice(0, 10)
@@ -674,7 +701,7 @@ function openSelectTable(type) {
 function selectTableForStart(t) {
   if (t.status === 'occupied') return
   showSelectTable.value = false
-  startTable.value = { id: t.id, number: t.table_number, rate: parseFloat(t.rate_per_hour) }
+  startTable.value = { id: t.id, number: t.table_number, type: t.type, rate: parseFloat(t.rate_per_hour) }
   startForm.value = emptyStartForm()
   customerQuery.value = ''
   customerResults.value = []
@@ -714,6 +741,7 @@ async function confirmStart() {
       hours: startForm.value.hours,
       promo: startForm.value.promo && promoActive.value ? 1 : 0,
       free_hour: canClaimFree.value && startForm.value.freeHour ? 1 : 0,
+      karaoke: startTable.value.type === 'vip' && startForm.value.karaoke ? 1 : 0,
       payment: startForm.value.payment.toFixed(2),
     }
     const res = await store.startSession(body)

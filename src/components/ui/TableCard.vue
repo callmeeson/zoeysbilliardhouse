@@ -102,7 +102,7 @@ const isMaintenance = computed(() => props.table.status === 'maintenance')
 
 const statusLabel = computed(() => capitalize(props.table.status))
 const typeLabel = computed(() => {
-  const map = { regular: 'Regular Table', vip: 'VIP Table', ktv: 'KTV Room', kubo: 'Kubo' }
+  const map = { regular: 'Regular Table', vip: 'VIP Table', kubo: 'Kubo' }
   return map[props.table.type] || capitalize(props.table.type)
 })
 const dotClass = computed(() =>

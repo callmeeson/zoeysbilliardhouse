@@ -18,6 +18,7 @@ function start_billiard_session(array $in, int $fromReservationId = 0): array {
     if (!$t) throw new RuntimeException('Table not found.');
     if ($t['status'] === 'maintenance') throw new RuntimeException('Table is under maintenance.');
     if ($t['status'] === 'occupied') throw new RuntimeException('Table is already occupied.');
+    $karaoke = (int)($in['karaoke'] ?? 0) === 1 && $t['type'] === 'vip';
 
     // Walk-in vs reservation conflict: block when a confirmed reservation
     // window overlaps the intended play window (now -> end). Windows may
@@ -69,9 +70,9 @@ function start_billiard_session(array $in, int $fromReservationId = 0): array {
         }
         $startTime = now();
         $endTime   = date('Y-m-d H:i:s', strtotime($startTime) + 3600); // default 1 hour
-        db()->prepare("INSERT INTO billiard_sessions (table_id, customer_id, customer_name, start_time, end_time, status, user_id)
-                       VALUES (?,?,?,?,?, 'open', ?)")
-             ->execute([$tableId, $customerId > 0 ? $customerId : null, $customerName, $startTime, $endTime, (int)$_SESSION['user_id']]);
+        db()->prepare("INSERT INTO billiard_sessions (table_id, customer_id, customer_name, start_time, end_time, karaoke, status, user_id)
+                   VALUES (?,?,?,?,?, ?, 'open', ?)")
+             ->execute([$tableId, $customerId > 0 ? $customerId : null, $customerName, $startTime, $endTime, $karaoke ? 1 : 0, (int)$_SESSION['user_id']]);
         db()->prepare("UPDATE tables SET status = 'occupied' WHERE id = ?")->execute([$tableId]);
         return ['session_id' => (int)db()->lastInsertId(), 'change' => 0.0, 'free_hour_applied' => false];
     }
@@ -117,9 +118,9 @@ function start_billiard_session(array $in, int $fromReservationId = 0): array {
         $endTime   = date('Y-m-d H:i:s', strtotime($startTime) + (int)round($hours * 3600));
 
         $db->prepare("INSERT INTO billiard_sessions
-                      (table_id, customer_id, customer_name, start_time, end_time, extended_hours, prepaid, free_hour_used, status, user_id)
-                      VALUES (?,?,?,?,?,?,?,?, 'open', ?)")
-              ->execute([$tableId, $customerId > 0 ? $customerId : null, $customerName, $startTime, $endTime, $hours, $total, $freeHourApplied ? 1 : 0, (int)$_SESSION['user_id']]);
+                          (table_id, customer_id, customer_name, start_time, end_time, extended_hours, prepaid, free_hour_used, karaoke, status, user_id)
+                          VALUES (?,?,?,?,?,?,?,?,?, 'open', ?)")
+                      ->execute([$tableId, $customerId > 0 ? $customerId : null, $customerName, $startTime, $endTime, $hours, $total, $freeHourApplied ? 1 : 0, $karaoke ? 1 : 0, (int)$_SESSION['user_id']]);
         $sid = (int)$db->lastInsertId();
 
         $reference = make_reference();
@@ -148,7 +149,7 @@ function start_billiard_session(array $in, int $fromReservationId = 0): array {
 switch ($action) {
 
     case 'list': {
-        $tables = db_all("SELECT * FROM tables ORDER BY FIELD(type, 'regular', 'vip', 'ktv'), table_number");
+        $tables = db_all("SELECT * FROM tables ORDER BY FIELD(type, 'regular', 'vip', 'kubo'), table_number");
         $sessions = [];
         $stampMap = [];
         $nextRes = [];
@@ -642,7 +643,7 @@ switch ($action) {
         $type   = $_POST['type'] ?? 'regular';
         $rate   = (float)($_POST['rate_per_hour'] ?? 0);
         if ($number === '' || $rate <= 0) json_response(422, ['ok' => false, 'message' => 'Table number and rate required.']);
-        if (!in_array($type, ['regular', 'vip', 'ktv', 'kubo'], true)) json_response(422, ['ok' => false, 'message' => 'Invalid table type.']);
+        if (!in_array($type, ['regular', 'vip', 'kubo'], true)) json_response(422, ['ok' => false, 'message' => 'Invalid table type.']);
 
         $dup = db_value('SELECT id FROM tables WHERE table_number = ? AND id <> ?', [$number, $tableId]);
         if ($dup) json_response(409, ['ok' => false, 'message' => 'A table with that number already exists.']);
