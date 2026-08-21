@@ -167,16 +167,16 @@
       </header>
 
       <main v-if="userStore.isAuthenticated" class="flex-1 px-4 py-6 lg:px-6">
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
+        <router-view v-slot="{ Component, route }">
+          <transition name="fade">
+            <component :is="Component" :key="route.fullPath" />
           </transition>
         </router-view>
       </main>
       <main v-else class="flex-1">
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
+        <router-view v-slot="{ Component, route }">
+          <transition name="fade">
+            <component :is="Component" :key="route.fullPath" />
           </transition>
         </router-view>
       </main>

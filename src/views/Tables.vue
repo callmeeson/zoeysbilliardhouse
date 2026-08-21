@@ -558,7 +558,8 @@ const startChange = computed(() => Math.max(0, startForm.value.payment - startDu
 // extend summary — active promo applies automatically
 const extendRate = computed(() => parseFloat(activeExtendTable.value?.rate_per_hour || 0))
 const extendAmount = computed(() => extendRate.value * extendForm.value.hours)
-const extendDiscount = computed(() => (activePromo.value ? Math.round(extendAmount.value * (activePromo.value.discount_percent / 100) * 100) / 100 : 0))
+const extendPromoApplied = computed(() => !!activeExtendTable.value?.session?.promo_applied)
+const extendDiscount = computed(() => (extendPromoApplied.value && activePromo.value ? Math.round(extendAmount.value * (activePromo.value.discount_percent / 100) * 100) / 100 : 0))
 const extendDue = computed(() => Math.max(0, extendAmount.value - extendDiscount.value))
 const extendChange = computed(() => Math.max(0, extendForm.value.payment - extendDue.value))
 
@@ -678,7 +679,7 @@ const submitExtendSession = async () => {
   try {
     const res = await store.extendSession({
       ...extendForm.value,
-      promo: activePromo.value ? 1 : 0,
+      promo: extendPromoApplied.value ? 1 : 0,
     })
     if (res.ok) {
       activeExtendTable.value = null

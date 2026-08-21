@@ -1,12 +1,24 @@
 import axios from 'axios'
 
+// The app is served from a sub-folder in production (e.g.
+// /ZoeysBilliardHouseManagementSystem/) and from the Vite dev server root in
+// development. A hard-coded '/api/ajax' resolves against the domain root, so it
+// 404s under a sub-folder. Derive the prefix from the document path instead —
+// hash routing means location.pathname never changes while the SPA is running.
+const appBase = window.location.pathname.replace(/\/[^/]*$/, '/')
+
 const api = axios.create({
-  baseURL: '/api/ajax',
+  baseURL: `${appBase}api/ajax`,
   withCredentials: true,
 })
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.data && response.data.ok === false) {
+      return Promise.reject(response)
+    }
+    return response
+  },
   (error) => {
     const isAuthRequest =
       error.config?.url?.includes('auth.php') && (
@@ -14,16 +26,7 @@ api.interceptors.response.use(
         ['me', 'logout'].includes(error.config?.params?.action)
       )
 
-    if (error.response?.status === 401) {
-      if (isAuthRequest) {
-        return Promise.resolve({
-          data: {
-            ok: false,
-            message: 'Not authenticated.',
-          },
-        })
-      }
-
+    if (isAuthRequest && error.response?.status === 401) {
       if (!window.location.hash.includes('/login')) {
         window.location.hash = '#/login'
       }

@@ -304,7 +304,7 @@
           </div>
         </div>
 
-        <div v-if="promoActive" class="rounded-xl border border-brand-gold-strong/40 bg-brand-gold/5 p-2.5 text-xs text-muted">
+        <div v-if="promoActive && extendPromoApplied" class="rounded-xl border border-brand-gold-strong/40 bg-brand-gold/5 p-2.5 text-xs text-muted">
           <Percent :size="12" class="mr-1 inline text-brand-gold-strong" />{{ promoLabel }} is active — {{ activePromo.discount_percent }}% off applied automatically to this extension.
         </div>
 
@@ -644,7 +644,8 @@ const startChange = computed(() => Math.max(0, startForm.value.payment - startDu
 
 // extend summary
 const extendAmount = computed(() => extendRate.value * extendForm.value.hours)
-const extendDiscount = computed(() => (activePromo.value ? Math.round(extendAmount.value * (activePromo.value.discount_percent / 100) * 100) / 100 : 0))
+const extendPromoApplied = computed(() => !!extendTarget.value?.promo_applied)
+const extendDiscount = computed(() => (extendPromoApplied.value && activePromo.value ? Math.round(extendAmount.value * (activePromo.value.discount_percent / 100) * 100) / 100 : 0))
 const extendDue = computed(() => Math.max(0, extendAmount.value - extendDiscount.value))
 const extendChange = computed(() => Math.max(0, extendForm.value.payment - extendDue.value))
 
@@ -792,7 +793,7 @@ async function confirmExtend() {
       session_id: extendTarget.value.id,
       hours: extendForm.value.hours,
       payment: extendForm.value.payment.toFixed(2),
-      promo: activePromo.value ? 1 : 0,
+      promo: extendPromoApplied.value ? 1 : 0,
     })
     if (res.ok) {
       toast(`Session extended on Table ${extendTarget.value.table.table_number}`, 'success')

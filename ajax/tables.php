@@ -179,10 +179,14 @@ switch ($action) {
             ];
         }
         $promoMap = [];
-        foreach (db_all("SELECT billiard_session_id, COALESCE(SUM(discount),0) AS disc
-                         FROM sales WHERE billiard_session_id IS NOT NULL
-                         GROUP BY billiard_session_id") as $ps) {
-            $promoMap[(int)$ps['billiard_session_id']] = (float)$ps['disc'];
+        foreach (db_all("SELECT sa.billiard_session_id,
+                                CASE WHEN COALESCE(SUM(sa.discount), 0) > CASE WHEN bs.free_hour_used = 1 THEN t.rate_per_hour ELSE 0 END THEN 1 ELSE 0 END AS promo_applied
+                         FROM sales sa
+                         JOIN billiard_sessions bs ON bs.id = sa.billiard_session_id
+                         JOIN tables t ON t.id = bs.table_id
+                         WHERE sa.billiard_session_id IS NOT NULL
+                         GROUP BY sa.billiard_session_id, bs.free_hour_used, t.rate_per_hour") as $ps) {
+            $promoMap[(int)$ps['billiard_session_id']] = (int)$ps['promo_applied'] === 1;
         }
         foreach (db_all("SELECT * FROM billiard_sessions WHERE status = 'open'") as $s) {
             $s['promo_applied'] = ($promoMap[(int)$s['id']] ?? 0.0) > 0;
@@ -343,6 +347,13 @@ switch ($action) {
         $promo = (int)($_POST['promo'] ?? 0) === 1;
         $s = db_row('SELECT * FROM billiard_sessions WHERE id = ? AND status = "open"', [$sid]);
         if (!$s) json_response(404, ['ok' => false, 'message' => 'Session not found or already closed.']);
+        $promoApplied = (int)db_value("SELECT CASE WHEN COALESCE(SUM(sa.discount), 0) > CASE WHEN bs.free_hour_used = 1 THEN t.rate_per_hour ELSE 0 END THEN 1 ELSE 0 END
+                                      FROM sales sa
+                                      JOIN billiard_sessions bs ON bs.id = sa.billiard_session_id
+                                      JOIN tables t ON t.id = bs.table_id
+                                      WHERE sa.billiard_session_id = ?
+                                      GROUP BY bs.free_hour_used, t.rate_per_hour", [$sid]) === 1;
+        $promo = $promo && $promoApplied;
         if ($hours < 0.5 || $hours > 48) json_response(422, ['ok' => false, 'message' => 'Extend between 0.5 and 48 hours.']);
 
         // Block extension when the added time runs into a confirmed reservation.
