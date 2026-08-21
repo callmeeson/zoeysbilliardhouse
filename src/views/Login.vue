@@ -49,7 +49,7 @@
         <h1 class="text-4xl font-extrabold leading-tight text-white drop-shadow-lg">
           Rack &rsquo;em up,<br />settle &rsquo;em <span class="text-brand-gold">fast.</span>
         </h1>
-        <p class="mt-4 text-brand-gold/90">Billiard, bar &amp; reservation management from one modern table.</p>
+        <p class="mt-4 text-brand-gold/90">Billiard &amp; reservation and POS management in one place.</p>
       </div>
 
       <div class="flex items-center gap-6 text-sm text-[#cfe6d6] fade-up delay-2">
@@ -111,13 +111,14 @@
             </button>
           </form>
 
-          <div class="mt-6 rounded-lg border border-brand-gold/20 bg-brand-gold/10 px-3 py-2 text-center text-xs text-brand-gold">
-            Default credentials: <code class="font-semibold">admin</code> / <code class="font-semibold">admin123</code>
-          </div>
+         
         </div>
 
         <p class="mt-6 text-center text-xs text-white/30 fade-up delay-2">
           &copy; {{ year }} Zoeys Billiard House. All rights reserved.
+        </p>
+        <p class="mt-1 text-center text-xs text-white/30 fade-up delay-2">
+          Developed by Erickson Estanislao
         </p>
       </div>
     </div>

@@ -224,14 +224,15 @@
     </Modal>
 
     <!-- Import products modal -->
-    <Modal v-if="showImport" title="Import Products (CSV)" @close="showImport = false">
+    <Modal v-if="showImport" title="Import Products (CSV or Excel)" @close="showImport = false">
       <div class="mb-3 rounded-xl border border-line bg-elevated px-3.5 py-3 text-xs text-muted">
         <p class="mb-1 font-semibold text-ink">Expected columns (in order):</p>
         <p class="font-mono">Name, Category, Supplier, Buying Price, Selling Price, Stock, Low Stock, Status</p>
+        <p class="mt-2">Accepted files: CSV, XLS, or XLSX. Excel files use the first worksheet.</p>
         <p class="mt-2">Products are matched by name — existing ones are updated. Categories and suppliers are created automatically. The Stock column sets the new quantity (admins only). First row is treated as the header.</p>
       </div>
       <div class="mb-3">
-        <input ref="fileInput" type="file" accept=".csv,text/csv" class="form-input" @change="onImportFile" />
+        <input ref="fileInput" type="file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="form-input" @change="onImportFile" />
       </div>
       <div v-if="importResult" class="mb-3 rounded-xl border px-3.5 py-3 text-sm" :class="importResult.imported ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' : 'border-red-500/30 bg-red-500/10 text-red-500'">
         {{ importResult.message }}
@@ -248,6 +249,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import * as XLSX from 'xlsx'
 import { confirmBox, toast } from '@/utils/dialogs'
 import { exportExcel } from '@/utils/export'
 import { productsApi } from '@/api/services'
@@ -259,7 +261,7 @@ const productsStore = useProductsStore()
 const authStore = useAuthStore()
 
 const search = ref('')
-const statusFilter = ref('')
+const statusFilter = ref('active')
 const categoryFilter = ref('')
 const loading = ref(false)
 const showForm = ref(false)
@@ -334,8 +336,17 @@ const onImportFile = async (e) => {
   loading.value = true
   importResult.value = null
   try {
+    let importFile = file
+    if (/\.(xls|xlsx)$/i.test(file.name)) {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+      if (!firstSheet) throw new Error('The Excel file has no worksheets.')
+      const csv = XLSX.utils.sheet_to_csv(firstSheet)
+      const csvName = file.name.replace(/\.(xls|xlsx)$/i, '.csv')
+      importFile = new File([csv], csvName, { type: 'text/csv' })
+    }
     const fd = new FormData()
-    fd.append('file', file)
+    fd.append('file', importFile)
     const res = await productsApi.importProducts(fd)
     importResult.value = { imported: res.data.ok, message: res.data.message || 'Import failed.', errors: res.data.errors || [] }
     if (res.data.ok) {
